@@ -29,8 +29,8 @@ final class AppDatabase {
         } catch {
             // Fatal: can't open database. Show error and terminate gracefully.
             print("[AppDatabase] FATAL: Cannot open database at \(dbURL.path): \(error)")
-            // Provide a last-resort in-memory pool so the app doesn't crash silently mid-init
-            pool = try! DatabasePool()
+            // Provide a last-resort in-memory queue so the app doesn't crash silently mid-init
+            pool = try! DatabasePool(path: ":memory:")
             return
         }
 
