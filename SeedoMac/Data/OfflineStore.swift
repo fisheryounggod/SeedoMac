@@ -8,16 +8,20 @@ final class OfflineStore {
     convenience init() { self.init(db: AppDatabase.shared.pool) }
     init(db: some DatabaseWriter & DatabaseReader) { self.db = db }
 
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
     func insert(_ activity: inout OfflineActivity) throws {
         try db.write { d in try activity.insert(d) }
     }
 
     func activities(for date: String) throws -> [OfflineActivity] {
         // date: YYYY-MM-DD
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        guard let day = formatter.date(from: date) else { return [] }
+        guard let day = Self.dayFormatter.date(from: date) else { return [] }
         let startMs = Int64(day.timeIntervalSince1970 * 1000)
         let endMs   = startMs + 86_400_000
         return try db.read { d in

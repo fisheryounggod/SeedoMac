@@ -15,6 +15,13 @@ final class EventStore {
         self.db = db
     }
 
+    private static let heatmapFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
     // MARK: - Write
 
     func insert(_ event: inout Event) throws {
@@ -80,14 +87,10 @@ final class EventStore {
                 GROUP  BY day
             """, arguments: [endMs, startMs, endMs, startMs])
 
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd"
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-
             return rows.compactMap { row -> HeatmapDay? in
                 let dateStr: String = row["day"]
                 let totalSecs: Double = row["total_secs"]
-                guard let date = formatter.date(from: dateStr) else { return nil }
+                guard let date = Self.heatmapFormatter.date(from: dateStr) else { return nil }
                 let weekday = (cal.component(.weekday, from: date) + 5) % 7  // 0=Mon
                 let weekOfYear = cal.component(.weekOfYear, from: date) - 1
                 return HeatmapDay(date: dateStr, totalSecs: totalSecs,

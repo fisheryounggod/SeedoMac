@@ -35,8 +35,14 @@ final class CategoryStore {
         let cats = try allCategories()
         let decoder = JSONDecoder()
         for cat in cats {
-            guard let data = cat.rules.data(using: .utf8),
-                  let rules = try? decoder.decode([CategoryRuleEntry].self, from: data) else { continue }
+            guard let data = cat.rules.data(using: .utf8) else { continue }
+            let rules: [CategoryRuleEntry]
+            do {
+                rules = try decoder.decode([CategoryRuleEntry].self, from: data)
+            } catch {
+                print("[CategoryStore] Failed to decode rules for category '\(cat.id)': \(error)")
+                continue
+            }
             for rule in rules {
                 let target: String
                 switch rule.field {

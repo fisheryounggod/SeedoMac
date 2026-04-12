@@ -2,40 +2,47 @@
 import Foundation
 
 final class SessionBuffer {
-    private(set) var currentEvent: Event?
-    private var pending: [Event] = []
+    private let queue = DispatchQueue(label: "tech.seedo.SessionBuffer", qos: .utility)
+    private var _currentEvent: Event?
+    private var _pending: [Event] = []
     private let flushHandler: ([Event]) -> Void
 
-    var pendingCount: Int { pending.count }
+    var currentEvent: Event? { queue.sync { _currentEvent } }
+    var pendingCount: Int    { queue.sync { _pending.count } }
 
     init(flushHandler: @escaping ([Event]) -> Void) {
         self.flushHandler = flushHandler
     }
 
     func process(app: String, title: String, bundleId: String, nowMs: Int64) {
-        let sameSession = currentEvent.map { $0.appOrDomain == app && $0.title == title } ?? false
+        queue.sync {
+            let sameSession = _currentEvent.map { $0.appOrDomain == app && $0.title == title } ?? false
 
-        if sameSession {
-            currentEvent?.endTs = nowMs
-        } else {
-            if let finished = currentEvent {
-                pending.append(finished)
-            }
-            currentEvent = Event(startTs: nowMs, endTs: nowMs, appOrDomain: app,
-                                 bundleId: bundleId.isEmpty ? nil : bundleId, title: title)
-            if pending.count >= 10 {
-                flushHandler(pending)
-                pending.removeAll()
+            if sameSession {
+                _currentEvent?.endTs = nowMs
+            } else {
+                if let finished = _currentEvent {
+                    _pending.append(finished)
+                }
+                _currentEvent = Event(startTs: nowMs, endTs: nowMs, appOrDomain: app,
+                                      bundleId: bundleId.isEmpty ? nil : bundleId, title: title)
+                if _pending.count >= 10 {
+                    let toFlush = _pending
+                    _pending.removeAll()
+                    flushHandler(toFlush)
+                }
             }
         }
     }
 
     /// Called every 30s and on app quit. Emits pending + current to flushHandler.
     func flushAll() {
-        var toFlush = pending
-        if let curr = currentEvent { toFlush.append(curr) }
-        pending.removeAll()
-        currentEvent = nil
-        if !toFlush.isEmpty { flushHandler(toFlush) }
+        queue.sync {
+            var toFlush = _pending
+            if let curr = _currentEvent { toFlush.append(curr) }
+            _pending.removeAll()
+            _currentEvent = nil
+            if !toFlush.isEmpty { flushHandler(toFlush) }
+        }
     }
 }
