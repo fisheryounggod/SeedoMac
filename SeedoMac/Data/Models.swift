@@ -43,7 +43,7 @@ struct Event: Identifiable, Codable, FetchableRecord, MutablePersistableRecord {
 
 // MARK: - Category
 
-struct Category: Identifiable, Codable, FetchableRecord, PersistableRecord {
+struct Category: Identifiable, Codable, Hashable, Equatable, FetchableRecord, PersistableRecord {
     var id: String
     var name: String
     var color: String = "#4A90D9"
