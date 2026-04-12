@@ -1,0 +1,446 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		84CA7227C1231BAF13F3C2E7 /* SeedoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29442D84EA7DE72F1DD96B31 /* SeedoApp.swift */; };
+		94081D71600969A0D59DE631 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = FA54FDA807CD447D799FDC0B /* GRDB */; };
+		DC63629FB202CBCC5D010391 /* PlaceholderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4898EACE5757A01F2E265C87 /* PlaceholderTests.swift */; };
+		E0360BDDFCEA9F5116A7762C /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F9C548B37AAC0327E4286B3 /* AppDelegate.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		5454D1BB03FA9794AC346772 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A2AC4E3C7D2EBFE98140E20E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0041DE7AEB64B8D88756F51B;
+			remoteInfo = SeedoMac;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		1D3ECCB1C76083AB238771C9 /* SeedoMacTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SeedoMacTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		29442D84EA7DE72F1DD96B31 /* SeedoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SeedoApp.swift; sourceTree = "<group>"; };
+		3F9C548B37AAC0327E4286B3 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		4898EACE5757A01F2E265C87 /* PlaceholderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceholderTests.swift; sourceTree = "<group>"; };
+		5883E37EC3983A31508AA6B8 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		7C222A399C224957562A9425 /* SeedoMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SeedoMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		B0E822841EE2C76D0B5607B3 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				94081D71600969A0D59DE631 /* GRDB in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		087EFCC2C1ED7B24BA238984 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				7C222A399C224957562A9425 /* SeedoMac.app */,
+				1D3ECCB1C76083AB238771C9 /* SeedoMacTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		0E8476926CB4710845481EE2 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		10332309A65289D903724EB1 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				3F9C548B37AAC0327E4286B3 /* AppDelegate.swift */,
+				29442D84EA7DE72F1DD96B31 /* SeedoApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		8564B3B4BE13BACB1BFCC094 /* SeedoMacTests */ = {
+			isa = PBXGroup;
+			children = (
+				4898EACE5757A01F2E265C87 /* PlaceholderTests.swift */,
+			);
+			path = SeedoMacTests;
+			sourceTree = "<group>";
+		};
+		AFCE896A3E6512531EF73590 = {
+			isa = PBXGroup;
+			children = (
+				F3A62460369E2599145721BD /* SeedoMac */,
+				8564B3B4BE13BACB1BFCC094 /* SeedoMacTests */,
+				087EFCC2C1ED7B24BA238984 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		F3A62460369E2599145721BD /* SeedoMac */ = {
+			isa = PBXGroup;
+			children = (
+				5883E37EC3983A31508AA6B8 /* Info.plist */,
+				10332309A65289D903724EB1 /* App */,
+				0E8476926CB4710845481EE2 /* Views */,
+			);
+			path = SeedoMac;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0041DE7AEB64B8D88756F51B /* SeedoMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2EB9BC996A618DB2C28A0922 /* Build configuration list for PBXNativeTarget "SeedoMac" */;
+			buildPhases = (
+				ECD19E6FCFEBE959DEC2A48D /* Sources */,
+				B0E822841EE2C76D0B5607B3 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SeedoMac;
+			packageProductDependencies = (
+				FA54FDA807CD447D799FDC0B /* GRDB */,
+			);
+			productName = SeedoMac;
+			productReference = 7C222A399C224957562A9425 /* SeedoMac.app */;
+			productType = "com.apple.product-type.application";
+		};
+		005B9924625C4C178C3C9680 /* SeedoMacTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A3583933B6567833A2348E29 /* Build configuration list for PBXNativeTarget "SeedoMacTests" */;
+			buildPhases = (
+				5FF07F0C48F508753C687AC9 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C7C166CCFD1B1B9B5D12B3CD /* PBXTargetDependency */,
+			);
+			name = SeedoMacTests;
+			packageProductDependencies = (
+			);
+			productName = SeedoMacTests;
+			productReference = 1D3ECCB1C76083AB238771C9 /* SeedoMacTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A2AC4E3C7D2EBFE98140E20E /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					0041DE7AEB64B8D88756F51B = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 3DD23937275F55A24707A316 /* Build configuration list for PBXProject "SeedoMac" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = AFCE896A3E6512531EF73590;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				CBEEBA2AB38E742763FA6652 /* XCRemoteSwiftPackageReference "GRDB.swift" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 087EFCC2C1ED7B24BA238984 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				0041DE7AEB64B8D88756F51B /* SeedoMac */,
+				005B9924625C4C178C3C9680 /* SeedoMacTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		5FF07F0C48F508753C687AC9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DC63629FB202CBCC5D010391 /* PlaceholderTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		ECD19E6FCFEBE959DEC2A48D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E0360BDDFCEA9F5116A7762C /* AppDelegate.swift in Sources */,
+				84CA7227C1231BAF13F3C2E7 /* SeedoApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		C7C166CCFD1B1B9B5D12B3CD /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 0041DE7AEB64B8D88756F51B /* SeedoMac */;
+			targetProxy = 5454D1BB03FA9794AC346772 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		16E51E624904337AE7324817 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = tech.seedo.SeedoMacTests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SeedoMac.app/Contents/MacOS/SeedoMac";
+			};
+			name = Release;
+		};
+		6FE90E8D889F852FD37A269C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = SeedoMac/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = tech.seedo.mac;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.10;
+			};
+			name = Debug;
+		};
+		70F4D53D0CE8DEF408576CF8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		780D106B99B475C51811E1ED /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		A57AD2A9DEC6F8BD2B95B56D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = tech.seedo.SeedoMacTests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SeedoMac.app/Contents/MacOS/SeedoMac";
+			};
+			name = Debug;
+		};
+		A65365DE2530CB00F572E65C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = SeedoMac/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = tech.seedo.mac;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.10;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		2EB9BC996A618DB2C28A0922 /* Build configuration list for PBXNativeTarget "SeedoMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6FE90E8D889F852FD37A269C /* Debug */,
+				A65365DE2530CB00F572E65C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		3DD23937275F55A24707A316 /* Build configuration list for PBXProject "SeedoMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				70F4D53D0CE8DEF408576CF8 /* Debug */,
+				780D106B99B475C51811E1ED /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A3583933B6567833A2348E29 /* Build configuration list for PBXNativeTarget "SeedoMacTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A57AD2A9DEC6F8BD2B95B56D /* Debug */,
+				16E51E624904337AE7324817 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		CBEEBA2AB38E742763FA6652 /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/groue/GRDB.swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 6.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		FA54FDA807CD447D799FDC0B /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CBEEBA2AB38E742763FA6652 /* XCRemoteSwiftPackageReference "GRDB.swift" */;
+			productName = GRDB;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A2AC4E3C7D2EBFE98140E20E /* Project object */;
+}
