@@ -215,6 +215,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				PRODUCT_BUNDLE_IDENTIFIER = tech.seedo.SeedoMacTests;
 				SDKROOT = macosx;
+				SWIFT_VERSION = 5.10;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SeedoMac.app/Contents/MacOS/SeedoMac";
 			};
 			name = Release;
@@ -369,6 +370,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				PRODUCT_BUNDLE_IDENTIFIER = tech.seedo.SeedoMacTests;
 				SDKROOT = macosx;
+				SWIFT_VERSION = 5.10;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SeedoMac.app/Contents/MacOS/SeedoMac";
 			};
 			name = Debug;

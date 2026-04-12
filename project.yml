@@ -27,14 +27,6 @@ targets:
     dependencies:
       - package: GRDB
         product: GRDB
-    info:
-      path: SeedoMac/Info.plist
-      properties:
-        LSUIElement: true
-        NSHumanReadableCopyright: "© 2026 Seedo"
-        CFBundleDisplayName: Seedo
-        CFBundleShortVersionString: "1.0.0"
-        CFBundleVersion: "1"
   SeedoMacTests:
     type: bundle.unit-test
     platform: macOS
@@ -45,3 +37,4 @@ targets:
     settings:
       base:
         MACOSX_DEPLOYMENT_TARGET: "13.0"
+        SWIFT_VERSION: "5.10"
