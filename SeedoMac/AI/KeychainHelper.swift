@@ -6,7 +6,8 @@ enum KeychainHelper {
     private static let service = "tech.seedo.mac"
     private static let account = "ai_api_key"
 
-    static func saveAPIKey(_ key: String) {
+    @discardableResult
+    static func saveAPIKey(_ key: String) -> Bool {
         let data = Data(key.utf8)
         let query: [CFString: Any] = [
             kSecClass:       kSecClassGenericPassword,
@@ -15,7 +16,8 @@ enum KeychainHelper {
         ]
         SecItemDelete(query as CFDictionary)
         let attrs = query.merging([kSecValueData: data]) { _, new in new }
-        SecItemAdd(attrs as CFDictionary, nil)
+        let status = SecItemAdd(attrs as CFDictionary, nil)
+        return status == errSecSuccess
     }
 
     static func loadAPIKey() -> String? {

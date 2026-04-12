@@ -11,6 +11,7 @@ KEYWORDS: 关键词1, 关键词2, 关键词3
 
 final class AIService {
     static let shared = AIService()
+    private init() {}
 
     private var baseURL: String {
         AppDatabase.shared.setting(for: "ai_base_url") ?? "https://api.openai.com/v1"
@@ -67,7 +68,11 @@ final class AIService {
             }
 
             let summary = self.parseSummary(date: date, content: content)
-            try? OfflineStore().saveSummary(summary)
+            do {
+                try OfflineStore().saveSummary(summary)
+            } catch {
+                print("[AI] Failed to persist summary: \(error)")
+            }
             completion(.success(summary))
         }.resume()
     }
