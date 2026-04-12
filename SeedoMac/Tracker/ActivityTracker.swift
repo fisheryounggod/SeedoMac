@@ -81,12 +81,16 @@ final class ActivityTracker {
         buffer.process(app: appName, title: title, bundleId: bundleId, nowMs: nowMs)
 
         // Update shared state on main thread for UI
-        let sessionStart = buffer.currentEvent?.startTs ?? nowMs
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.appState.currentApp = appName
             self.appState.currentTitle = title
-            self.appState.currentSessionStartMs = sessionStart
+            // Only update session start if the buffer's current event is still for the same app
+            if self.buffer.currentEvent?.appOrDomain == appName {
+                self.appState.currentSessionStartMs = self.buffer.currentEvent?.startTs ?? nowMs
+            } else {
+                self.appState.currentSessionStartMs = nowMs
+            }
             self.appState.hasAccessibilityPermission = WindowInfoProvider.isPermissionGranted
         }
     }
