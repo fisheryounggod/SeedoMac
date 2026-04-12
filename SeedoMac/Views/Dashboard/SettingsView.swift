@@ -61,9 +61,6 @@ struct SettingsView: View {
                 }
 
                 Toggle("Redact Window Titles (Privacy)", isOn: $appState.isRedactTitles)
-                    .onChange(of: appState.isRedactTitles) { newVal in
-                        AppDatabase.shared.saveSetting(key: "redact_titles", value: newVal ? "true" : "false")
-                    }
             }
 
             // System
@@ -87,6 +84,7 @@ struct SettingsView: View {
                 Button("Open Logs Folder") {
                     let logDir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
                         .appendingPathComponent("Logs/SeedoMac")
+                    try? FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
                     NSWorkspace.shared.open(logDir)
                 }
             }
@@ -113,13 +111,24 @@ struct SettingsView: View {
         model = AppDatabase.shared.setting(for: "ai_model") ?? "gpt-4o-mini"
         afkMinutes = appState.afkThresholdSecs / 60
         autostartEnabled = (SMAppService.mainApp.status == .enabled)
+        // Infer provider from loaded URL
+        if let match = providers.first(where: { $0.2 == baseURL }) {
+            provider = match.0
+        } else if baseURL != "https://api.openai.com/v1" {
+            provider = "custom"
+        }
     }
 
     private func saveSettings() {
-        if !apiKey.isEmpty { KeychainHelper.saveAPIKey(apiKey) }
+        if apiKey.isEmpty {
+            KeychainHelper.deleteAPIKey()
+        } else {
+            KeychainHelper.saveAPIKey(apiKey)
+        }
         AppDatabase.shared.saveSetting(key: "ai_base_url", value: baseURL)
         AppDatabase.shared.saveSetting(key: "ai_model", value: model)
         AppDatabase.shared.saveSetting(key: "afk_threshold_secs", value: String(afkMinutes * 60))
+        AppDatabase.shared.saveSetting(key: "redact_titles", value: appState.isRedactTitles ? "true" : "false")
         appState.afkThresholdSecs = afkMinutes * 60
         saveStatus = "Saved ✓"
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saveStatus = nil }
