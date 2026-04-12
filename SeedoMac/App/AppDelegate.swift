@@ -5,7 +5,7 @@ import SwiftUI
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
-    var dashboardWindowController: DashboardWindowController?
+    private var dashboardWindowController: DashboardWindowController?
     let appState = AppState()
     private var tracker: ActivityTracker!
     private var refreshTimer: Timer?
@@ -62,7 +62,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         refreshTodayStats()  // immediate first load
     }
 
-    func refreshTodayStats() {
+    private func refreshTodayStats() {
         let store = EventStore()
         let catStore = CategoryStore()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -118,7 +118,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func openDashboard() {
+    private func openDashboard() {
         popover.performClose(nil)
         if dashboardWindowController == nil {
             dashboardWindowController = DashboardWindowController(appState: appState)

@@ -129,14 +129,6 @@ struct TodayView: View {
         .padding(.vertical, 10)
     }
 
-    // MARK: - Helpers
-
-    private func formatDuration(_ secs: Double) -> String {
-        let h = Int(secs) / 3600
-        let m = (Int(secs) % 3600) / 60
-        if h > 0 { return "\(h)h \(m)m" }
-        return "\(m)m"
-    }
 }
 
 // MARK: - Category Bar Row
@@ -176,12 +168,6 @@ struct CategoryBarRow: View {
         .padding(.horizontal, 16)
     }
 
-    private func formatDuration(_ secs: Double) -> String {
-        let h = Int(secs) / 3600
-        let m = (Int(secs) % 3600) / 60
-        if h > 0 { return "\(h)h \(m)m" }
-        return "\(m)m"
-    }
 }
 
 // MARK: - Color(hex:) extension (defined once here, used across all views)
@@ -196,4 +182,12 @@ extension Color {
         let b = Double(int         & 0xFF) / 255
         self.init(red: r, green: g, blue: b)
     }
+}
+
+// MARK: - Shared Helpers
+
+fileprivate func formatDuration(_ secs: Double) -> String {
+    let h = Int(secs) / 3600
+    let m = (Int(secs) % 3600) / 60
+    return h > 0 ? "\(h)h \(m)m" : "\(m)m"
 }
