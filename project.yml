@@ -1,0 +1,47 @@
+name: SeedoMac
+options:
+  bundleIdPrefix: tech.seedo
+  deploymentTarget:
+    macOS: "13.0"
+  xcodeVersion: "15"
+  createIntermediateGroups: true
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift
+    from: "6.0.0"
+targets:
+  SeedoMac:
+    type: application
+    platform: macOS
+    sources:
+      - path: SeedoMac
+    resources:
+      - path: SeedoMac/Resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: tech.seedo.mac
+        SWIFT_VERSION: "5.10"
+        MACOSX_DEPLOYMENT_TARGET: "13.0"
+        CODE_SIGN_STYLE: Automatic
+        INFOPLIST_FILE: SeedoMac/Info.plist
+    dependencies:
+      - package: GRDB
+        product: GRDB
+    info:
+      path: SeedoMac/Info.plist
+      properties:
+        LSUIElement: true
+        NSHumanReadableCopyright: "© 2026 Seedo"
+        CFBundleDisplayName: Seedo
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+  SeedoMacTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: SeedoMacTests
+    dependencies:
+      - target: SeedoMac
+    settings:
+      base:
+        MACOSX_DEPLOYMENT_TARGET: "13.0"
