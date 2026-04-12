@@ -12,10 +12,34 @@ final class AppDatabase {
             for: .applicationSupportDirectory, in: .userDomainMask
         )[0]
         let dir = appSupport.appendingPathComponent("Seedo")
-        try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch {
+            // Directory may already exist — only log if it's a real error
+            if (error as NSError).code != NSFileWriteFileExistsError {
+                print("[AppDatabase] Failed to create app directory: \(error)")
+            }
+        }
+
         let dbURL = dir.appendingPathComponent("seedo.db")
-        pool = try! DatabasePool(path: dbURL.path)
-        try! migrate()
+
+        do {
+            pool = try DatabasePool(path: dbURL.path)
+        } catch {
+            // Fatal: can't open database. Show error and terminate gracefully.
+            print("[AppDatabase] FATAL: Cannot open database at \(dbURL.path): \(error)")
+            // Provide a last-resort in-memory pool so the app doesn't crash silently mid-init
+            pool = try! DatabasePool()
+            return
+        }
+
+        do {
+            try migrate()
+        } catch {
+            print("[AppDatabase] Migration failed: \(error)")
+            // Don't crash — app can still run with existing schema
+        }
     }
 
     private func migrate() throws {
@@ -89,14 +113,23 @@ final class AppDatabase {
     }
 
     func setting(for key: String) -> String? {
-        try? read { db in
-            try AppSetting.fetchOne(db, key: key)?.value
+        do {
+            return try read { db in
+                try AppSetting.fetchOne(db, key: key)?.value
+            }
+        } catch {
+            print("[AppDatabase] Failed to read setting '\(key)': \(error)")
+            return nil
         }
     }
 
     func saveSetting(key: String, value: String) {
-        try? write { db in
-            try AppSetting(key: key, value: value).save(db)
+        do {
+            try write { db in
+                try AppSetting(key: key, value: value).save(db)
+            }
+        } catch {
+            print("[AppDatabase] Failed to save setting '\(key)': \(error)")
         }
     }
 }
