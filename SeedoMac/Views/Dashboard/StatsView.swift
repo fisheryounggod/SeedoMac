@@ -2,15 +2,21 @@
 import SwiftUI
 import Charts
 
-enum StatsPeriod: String, CaseIterable {
-    case today = "Today"
-    case week  = "Week"
-    case month = "Month"
+enum StatsPeriod: String, CaseIterable, Identifiable {
+    case today  = "Today"
+    case week   = "Week"
+    case month  = "Month"
+    case year   = "Year"
+    case custom = "Custom"
+
+    var id: String { rawValue }
 }
 
 struct StatsView: View {
     @ObservedObject var appState: AppState
     @State private var period: StatsPeriod = .today
+    @State private var customStart: Date = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+    @State private var customEnd: Date = Date()
     @State private var heatmapDays: [HeatmapDay] = []
     @State private var periodApps: [AppStat] = []
     @State private var periodCats: [CategoryStat] = []
@@ -26,6 +32,7 @@ struct StatsView: View {
             VStack(alignment: .leading, spacing: 20) {
                 heatmapSection
                 periodSelector
+                if period == .custom { customRangePicker }
                 HStack(alignment: .top, spacing: 20) {
                     if !periodCats.isEmpty { pieSection }
                     topAppsSection
@@ -36,6 +43,8 @@ struct StatsView: View {
         }
         .onAppear { loadData() }
         .onChange(of: period) { _ in loadPeriodData() }
+        .onChange(of: customStart) { _ in if period == .custom { loadPeriodData() } }
+        .onChange(of: customEnd)   { _ in if period == .custom { loadPeriodData() } }
     }
 
     // MARK: - Sections
@@ -49,12 +58,28 @@ struct StatsView: View {
 
     private var periodSelector: some View {
         Picker("Period", selection: $period) {
-            ForEach(StatsPeriod.allCases, id: \.self) { p in
+            ForEach(StatsPeriod.allCases) { p in
                 Text(p.rawValue).tag(p)
             }
         }
         .pickerStyle(.segmented)
-        .frame(maxWidth: 300)
+        .frame(maxWidth: 480)
+    }
+
+    private var customRangePicker: some View {
+        HStack(spacing: 12) {
+            DatePicker("From", selection: $customStart, in: ...customEnd,
+                       displayedComponents: .date)
+                .datePickerStyle(.compact)
+                .labelsHidden()
+            Text("→").foregroundStyle(.secondary)
+            DatePicker("To", selection: $customEnd, in: customStart...Date(),
+                       displayedComponents: .date)
+                .datePickerStyle(.compact)
+                .labelsHidden()
+            Spacer()
+        }
+        .font(.caption)
     }
 
     @ViewBuilder
@@ -338,6 +363,16 @@ struct StatsView: View {
         case .month:
             let start = cal.date(byAdding: .month, value: -1, to: now)!
             return (Int64(start.timeIntervalSince1970 * 1000), endMs)
+        case .year:
+            let start = cal.date(byAdding: .year, value: -1, to: now)!
+            return (Int64(start.timeIntervalSince1970 * 1000), endMs)
+        case .custom:
+            let startOfDay = cal.startOfDay(for: customStart)
+            // End-of-day for customEnd (exclusive 24h after its startOfDay), clamped to now
+            let endOfDay   = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: customEnd)) ?? customEnd
+            let clampedEnd = min(endOfDay, now)
+            return (Int64(startOfDay.timeIntervalSince1970 * 1000),
+                    Int64(clampedEnd.timeIntervalSince1970 * 1000))
         }
     }
 
