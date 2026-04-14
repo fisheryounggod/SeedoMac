@@ -103,4 +103,17 @@ final class EventStore {
         let all = try statsByRange(startMs: startMs, endMs: endMs)
         return Array(all.prefix(limit))
     }
+
+    /// Returns all events for a calendar day (YYYY-MM-DD string), ordered by start_ts ascending.
+    func eventsForDay(dateStr: String) throws -> [Event] {
+        guard let day = Self.heatmapFormatter.date(from: dateStr) else { return [] }
+        let startMs = Int64(day.timeIntervalSince1970 * 1000)
+        let endMs   = startMs + 86_400_000
+        return try db.read { d in
+            try Event
+                .filter(Column("start_ts") < endMs && Column("end_ts") > startMs)
+                .order(Column("start_ts"))
+                .fetchAll(d)
+        }
+    }
 }

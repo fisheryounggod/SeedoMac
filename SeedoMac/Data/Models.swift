@@ -151,3 +151,12 @@ func formatDuration(_ secs: Double) -> String {
     if h > 0 { return "\(h)h \(m)m" }
     return "\(m)m"
 }
+
+struct TimelineEvent: Identifiable {
+    var id: Int64
+    var appOrDomain: String
+    var startTs: Int64    // Unix ms
+    var endTs: Int64      // Unix ms
+    var categoryColor: String   // hex, e.g. "#4A90D9"
+    var categoryName: String?
+}

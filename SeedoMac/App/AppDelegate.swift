@@ -62,6 +62,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         refreshTodayStats()  // immediate first load
     }
 
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
     private func refreshTodayStats() {
         let store = EventStore()
         let catStore = CategoryStore()
@@ -84,10 +91,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                                     color: $0.value.color, totalSecs: $0.value.secs) }
                 .sorted { $0.totalSecs > $1.totalSecs }
 
+            // Build timeline events
+            let dateStr = AppDelegate.dayFormatter.string(from: Date())
+            let rawEvents = (try? EventStore().eventsForDay(dateStr: dateStr)) ?? []
+            let catStoreForTimeline = CategoryStore()
+            let timeline: [TimelineEvent] = rawEvents.compactMap { ev in
+                guard let id = ev.id else { return nil }
+                let cat = try? catStoreForTimeline.matchCategory(for: ev.appOrDomain, title: ev.title)
+                return TimelineEvent(
+                    id: id,
+                    appOrDomain: ev.appOrDomain,
+                    startTs: ev.startTs,
+                    endTs: ev.endTs,
+                    categoryColor: cat?.color ?? "#888888",
+                    categoryName: cat?.name
+                )
+            }
+
             DispatchQueue.main.async {
                 self.appState.todayTotalSecs = total
                 self.appState.todayCategoryStats = catStats
                 self.appState.todayTopApps = Array(apps.prefix(10))
+                self.appState.todayTimelineEvents = timeline
 
                 // Update menu bar title
                 let hrs  = Int(total) / 3600
