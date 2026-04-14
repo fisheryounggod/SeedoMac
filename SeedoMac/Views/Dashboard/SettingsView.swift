@@ -13,6 +13,9 @@ struct SettingsView: View {
     @State private var apiKeyMasked = true
     @State private var saveStatus: String? = nil
 
+    // Stats exclusion section
+    @State private var allCategories: [Category] = []
+
     private let providers = [
         ("openai",   "OpenAI",   "https://api.openai.com/v1"),
         ("deepseek", "DeepSeek", "https://api.deepseek.com/v1"),
@@ -63,6 +66,35 @@ struct SettingsView: View {
                 Toggle("Redact Window Titles (Privacy)", isOn: $appState.isRedactTitles)
             }
 
+            // Stats exclusion section — overview of which categories are
+            // counted in statistics. Mirrors the per-category toggle in
+            // CategoryView; single source of truth is Category.include_in_stats.
+            Section("Stats 排除分类") {
+                Text("关闭的分类不会计入统计和 Top Apps — 适合后台系统类分类。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if allCategories.isEmpty {
+                    Text("尚未定义任何分类")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(allCategories) { cat in
+                        Toggle(isOn: Binding(
+                            get: { cat.includeInStats },
+                            set: { newVal in toggleCategoryInclude(cat, include: newVal) }
+                        )) {
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(Color(hex: cat.color))
+                                    .frame(width: 10, height: 10)
+                                Text(cat.name)
+                            }
+                        }
+                    }
+                }
+            }
+
             // System
             Section("System") {
                 Toggle("Launch at Login", isOn: $autostartEnabled)
@@ -100,7 +132,10 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear { loadSettings() }
+        .onAppear {
+            loadSettings()
+            loadAllCategories()
+        }
     }
 
     // MARK: - Actions
@@ -133,6 +168,31 @@ struct SettingsView: View {
         NotificationCenter.default.post(name: .settingsDidSave, object: nil)
         saveStatus = "Saved ✓"
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saveStatus = nil }
+    }
+
+    // MARK: - Stats exclusion
+
+    private func loadAllCategories() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let cats = (try? CategoryStore().allCategories()) ?? []
+            DispatchQueue.main.async { allCategories = cats }
+        }
+    }
+
+    /// Flips a category's `includeInStats` flag and persists. Local state is
+    /// updated on the main thread so the toggle reflects immediately without
+    /// waiting for a full reload.
+    private func toggleCategoryInclude(_ cat: Category, include: Bool) {
+        var updated = cat
+        updated.includeInStats = include
+        DispatchQueue.global(qos: .userInitiated).async {
+            try? CategoryStore().save(updated)
+            DispatchQueue.main.async {
+                if let idx = allCategories.firstIndex(where: { $0.id == cat.id }) {
+                    allCategories[idx].includeInStats = include
+                }
+            }
+        }
     }
 
     private func toggleAutostart(_ enable: Bool) {
