@@ -44,6 +44,7 @@ struct OfflineView: View {
 
     // Shared
     @State private var activeTab: LogTab = .activities
+    @State private var summaryObserverToken: NSObjectProtocol? = nil
 
     private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -110,9 +111,17 @@ struct OfflineView: View {
         .onAppear {
             loadActivities()
             loadJournal()
-            NotificationCenter.default.addObserver(
-                forName: .dailySummaryDidSave, object: nil, queue: .main
-            ) { _ in loadJournal() }
+            if summaryObserverToken == nil {
+                summaryObserverToken = NotificationCenter.default.addObserver(
+                    forName: .dailySummaryDidSave, object: nil, queue: .main
+                ) { _ in loadJournal() }
+            }
+        }
+        .onDisappear {
+            if let token = summaryObserverToken {
+                NotificationCenter.default.removeObserver(token)
+                summaryObserverToken = nil
+            }
         }
         .onChange(of: activeTab) { tab in
             if tab == .journal { loadJournal() }
@@ -263,7 +272,10 @@ struct OfflineView: View {
 
     private func loadActivities() {
         let dateStr = Self.dayFormatter.string(from: selectedDate)
-        activities = (try? store.activities(for: dateStr)) ?? []
+        DispatchQueue.global(qos: .userInitiated).async {
+            let items = (try? store.activities(for: dateStr)) ?? []
+            DispatchQueue.main.async { activities = items }
+        }
     }
 
     private func loadJournal() {

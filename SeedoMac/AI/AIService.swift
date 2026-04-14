@@ -126,6 +126,7 @@ final class AIService {
 
 extension Notification.Name {
     static let dailySummaryDidSave = Notification.Name("tech.seedo.dailySummaryDidSave")
+    static let settingsDidSave     = Notification.Name("tech.seedo.settingsDidSave")
 }
 
 enum AIError: LocalizedError {

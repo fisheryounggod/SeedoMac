@@ -7,6 +7,9 @@ struct TimelineView: View {
     private let barHeight: CGFloat = 56
 
     var body: some View {
+        let events = allEvents()          // compute once
+        let dayStart = dayStartMs()       // compute once
+
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 // Title
@@ -39,8 +42,7 @@ struct TimelineView: View {
 
                             // Events canvas
                             Canvas { ctx, size in
-                                let dayStart = dayStartMs()
-                                for ev in allEvents() {
+                                for ev in events {
                                     let x1 = max(0, size.width * CGFloat(ev.startTs - dayStart) / CGFloat(86_400_000))
                                     let x2 = min(size.width, size.width * CGFloat(ev.endTs - dayStart) / CGFloat(86_400_000))
                                     guard x2 > x1 else { continue }
@@ -50,7 +52,7 @@ struct TimelineView: View {
                                 }
                                 // Current time cursor
                                 let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-                                let frac = CGFloat(nowMs - dayStartMs()) / CGFloat(86_400_000)
+                                let frac = CGFloat(nowMs - dayStart) / CGFloat(86_400_000)
                                 let cx = max(0, min(size.width, size.width * frac))
                                 ctx.fill(Path(CGRect(x: cx - 1, y: 0, width: 2, height: size.height)),
                                          with: .color(.red.opacity(0.8)))
@@ -94,13 +96,13 @@ struct TimelineView: View {
 
                 // Recent events list
                 GroupBox("Events") {
-                    if allEvents().isEmpty {
+                    if events.isEmpty {
                         Text("No activity recorded today yet.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .padding()
                     } else {
-                        ForEach(allEvents().reversed()) { ev in
+                        ForEach(events.reversed()) { ev in
                             HStack {
                                 RoundedRectangle(cornerRadius: 2)
                                     .fill(Color(hex: ev.categoryColor))

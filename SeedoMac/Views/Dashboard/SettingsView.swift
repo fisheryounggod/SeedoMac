@@ -130,6 +130,7 @@ struct SettingsView: View {
         AppDatabase.shared.saveSetting(key: "afk_threshold_secs", value: String(afkMinutes * 60))
         AppDatabase.shared.saveSetting(key: "redact_titles", value: appState.isRedactTitles ? "true" : "false")
         appState.afkThresholdSecs = afkMinutes * 60
+        NotificationCenter.default.post(name: .settingsDidSave, object: nil)
         saveStatus = "Saved ✓"
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saveStatus = nil }
     }

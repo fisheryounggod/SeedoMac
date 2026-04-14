@@ -286,7 +286,7 @@ struct StatsView: View {
         aiError = nil
         let apps = periodApps
         let total = apps.reduce(0.0) { $0 + $1.totalSecs }
-        let cats  = buildCategoryStats(apps: apps)
+        let cats  = periodCats   // already computed on background queue in loadPeriodData()
         let date  = Self.dateFormatter.string(from: Date())
 
         AIService.shared.generateDailySummary(

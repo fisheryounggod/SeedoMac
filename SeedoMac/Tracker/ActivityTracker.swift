@@ -13,13 +13,28 @@ final class ActivityTracker {
     }
     private var isAFK = false
 
+    // Cached settings — only written from main thread, read from tracker queue
+    private var _isTracking: Bool = true
+    private var _afkThreshold: Double = 900
+    private var _isRedactTitles: Bool = false
+
     init(appState: AppState,
          eventStore: EventStore = EventStore()) {
         self.appState = appState
         self.eventStore = eventStore
     }
 
+    /// Call from main thread when settings change.
+    func syncSettings(from appState: AppState) {
+        _isTracking     = appState.isTracking
+        _afkThreshold   = appState.afkThresholdSecs
+        _isRedactTitles = appState.isRedactTitles
+    }
+
     func start() {
+        // Snapshot current settings on the main thread before the timer fires
+        syncSettings(from: appState)
+
         // 1s activity tick
         let t = DispatchSource.makeTimerSource(queue: queue)
         t.schedule(deadline: .now(), repeating: .seconds(1))
@@ -54,14 +69,14 @@ final class ActivityTracker {
     // MARK: - Private
 
     private func tick() {
-        guard appState.isTracking else { return }
+        guard _isTracking else { return }
 
         // AFK detection using CoreGraphics idle time
         let idleSecs = CGEventSource.secondsSinceLastEventType(
             .combinedSessionState,
             eventType: CGEventType(rawValue: UInt32.max)!
         )
-        if idleSecs > appState.afkThresholdSecs {
+        if idleSecs > _afkThreshold {
             if !isAFK { isAFK = true }
             return
         }
@@ -75,11 +90,11 @@ final class ActivityTracker {
 
         // Window title via Accessibility API (gracefully degrades if no permission)
         let rawTitle = WindowInfoProvider.getTitle(pid: pid) ?? ""
-        let title    = appState.isRedactTitles ? "" : rawTitle
+        let title    = _isRedactTitles ? "" : rawTitle
 
         // URL extraction for browser apps (only when not redacting)
         let currentURL: String
-        if !appState.isRedactTitles && BrowserURLProvider.isBrowser(bundleId: bundleId) {
+        if !_isRedactTitles && BrowserURLProvider.isBrowser(bundleId: bundleId) {
             currentURL = BrowserURLProvider.getURL(pid: pid, bundleId: bundleId) ?? ""
         } else {
             currentURL = ""

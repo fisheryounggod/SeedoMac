@@ -15,6 +15,7 @@ final class SessionBuffer {
     }
 
     func process(app: String, title: String, url: String, bundleId: String, nowMs: Int64) {
+        var batchToFlush: [Event]? = nil
         queue.sync {
             let currentURL = _currentEvent?.url ?? ""
             let sameSession = _currentEvent.map {
@@ -32,22 +33,28 @@ final class SessionBuffer {
                 newEvent.url = url.isEmpty ? nil : url
                 _currentEvent = newEvent
                 if _pending.count >= 10 {
-                    let toFlush = _pending
+                    batchToFlush = _pending
                     _pending.removeAll()
-                    flushHandler(toFlush)
                 }
             }
+        }
+        // Call handler OUTSIDE the lock to avoid deadlock
+        if let batch = batchToFlush {
+            flushHandler(batch)
         }
     }
 
     /// Called every 30s and on app quit. Emits pending + current to flushHandler.
     func flushAll() {
+        var toFlush: [Event] = []
         queue.sync {
-            var toFlush = _pending
             if let curr = _currentEvent { toFlush.append(curr) }
-            _pending.removeAll()
+            toFlush += _pending
             _currentEvent = nil
-            if !toFlush.isEmpty { flushHandler(toFlush) }
+            _pending.removeAll()
+        }
+        if !toFlush.isEmpty {
+            flushHandler(toFlush)
         }
     }
 }

@@ -53,6 +53,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func startTracker() {
         tracker = ActivityTracker(appState: appState)
         tracker.start()
+        // Re-sync cached settings whenever the user saves settings
+        NotificationCenter.default.addObserver(
+            forName: .settingsDidSave, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.tracker.syncSettings(from: self.appState)
+        }
     }
 
     private func scheduleUIRefresh() {
