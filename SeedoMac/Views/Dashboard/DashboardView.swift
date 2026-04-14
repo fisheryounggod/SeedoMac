@@ -15,6 +15,17 @@ enum DashboardTab: String, CaseIterable {
         case .settings:   return "gearshape.fill"
         }
     }
+
+    /// Localized label shown in the sidebar. `rawValue` remains English for
+    /// logging, analytics, and debug output.
+    var displayName: String {
+        switch self {
+        case .stats:      return "统计"
+        case .categories: return "分类"
+        case .offline:    return "日志"
+        case .settings:   return "设置"
+        }
+    }
 }
 
 struct DashboardView: View {
@@ -24,7 +35,7 @@ struct DashboardView: View {
     var body: some View {
         NavigationSplitView {
             List(DashboardTab.allCases, id: \.self, selection: $selectedTab) { tab in
-                Label(tab.rawValue, systemImage: tab.icon)
+                Label(tab.displayName, systemImage: tab.icon)
             }
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 160, ideal: 180)
