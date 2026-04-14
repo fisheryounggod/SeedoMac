@@ -7,9 +7,9 @@ final class SessionBufferTests: XCTestCase {
         var flushed: [Event] = []
         let buf = SessionBuffer { events in flushed.append(contentsOf: events) }
 
-        buf.process(app: "Xcode", title: "main.swift", bundleId: "com.apple.dt.Xcode", nowMs: 1000)
-        buf.process(app: "Xcode", title: "main.swift", bundleId: "com.apple.dt.Xcode", nowMs: 2000)
-        buf.process(app: "Xcode", title: "main.swift", bundleId: "com.apple.dt.Xcode", nowMs: 3000)
+        buf.process(app: "Xcode", title: "main.swift", url: "", bundleId: "com.apple.dt.Xcode", nowMs: 1000)
+        buf.process(app: "Xcode", title: "main.swift", url: "", bundleId: "com.apple.dt.Xcode", nowMs: 2000)
+        buf.process(app: "Xcode", title: "main.swift", url: "", bundleId: "com.apple.dt.Xcode", nowMs: 3000)
 
         XCTAssertEqual(flushed.count, 0, "Same app should not flush")
         let current = buf.currentEvent
@@ -22,9 +22,9 @@ final class SessionBufferTests: XCTestCase {
         var flushed: [Event] = []
         let buf = SessionBuffer { events in flushed.append(contentsOf: events) }
 
-        buf.process(app: "Xcode",  title: "main.swift", bundleId: "com.apple.dt.Xcode", nowMs: 1000)
-        buf.process(app: "Xcode",  title: "main.swift", bundleId: "com.apple.dt.Xcode", nowMs: 3000)
-        buf.process(app: "Safari", title: "GitHub",     bundleId: "com.apple.Safari",   nowMs: 4000)
+        buf.process(app: "Xcode",  title: "main.swift", url: "", bundleId: "com.apple.dt.Xcode", nowMs: 1000)
+        buf.process(app: "Xcode",  title: "main.swift", url: "", bundleId: "com.apple.dt.Xcode", nowMs: 3000)
+        buf.process(app: "Safari", title: "GitHub",     url: "", bundleId: "com.apple.Safari",   nowMs: 4000)
 
         XCTAssertEqual(buf.pendingCount, 1)   // Xcode session is pending (not yet flushed)
         XCTAssertEqual(buf.currentEvent?.appOrDomain, "Safari")
@@ -34,8 +34,8 @@ final class SessionBufferTests: XCTestCase {
         var flushed: [Event] = []
         let buf = SessionBuffer { events in flushed.append(contentsOf: events) }
 
-        buf.process(app: "Xcode",  title: "", bundleId: "", nowMs: 1000)
-        buf.process(app: "Safari", title: "", bundleId: "", nowMs: 2000)
+        buf.process(app: "Xcode",  title: "", url: "", bundleId: "", nowMs: 1000)
+        buf.process(app: "Safari", title: "", url: "", bundleId: "", nowMs: 2000)
         buf.flushAll()
 
         XCTAssertEqual(flushed.count, 2)
@@ -49,7 +49,7 @@ final class SessionBufferTests: XCTestCase {
 
         // 11 distinct app switches → 10 pending auto-flush at switch #11
         for i in 0..<11 {
-            buf.process(app: "App\(i)", title: "", bundleId: "", nowMs: Int64(i * 1000))
+            buf.process(app: "App\(i)", title: "", url: "", bundleId: "", nowMs: Int64(i * 1000))
         }
 
         XCTAssertEqual(flushed.count, 10)

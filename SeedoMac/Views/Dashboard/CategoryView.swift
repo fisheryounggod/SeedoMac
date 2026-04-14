@@ -4,8 +4,8 @@ import SwiftUI
 // A single rule entry in the editor (not persisted directly — encoded to JSON)
 struct RuleEntry: Codable, Identifiable {
     var id: UUID = UUID()
-    var field: String = "app"       // "app" | "title"
-    var op: String    = "contains"  // "contains" | "equals"
+    var field: String = "app"       // "app" | "title" | "url"
+    var op: String    = "contains"  // "contains" | "equals" | "starts_with"
     var value: String = ""
 }
 
@@ -111,6 +111,7 @@ struct CategoryView: View {
                         Picker("", selection: $rule.field) {
                             Text("App Name").tag("app")
                             Text("Window Title").tag("title")
+                            Text("URL").tag("url")
                         }
                         .frame(width: 120)
                         .onChange(of: rule.field) { _ in isDirty = true }
@@ -118,8 +119,9 @@ struct CategoryView: View {
                         Picker("", selection: $rule.op) {
                             Text("contains").tag("contains")
                             Text("equals").tag("equals")
+                            Text("starts with").tag("starts_with")
                         }
-                        .frame(width: 90)
+                        .frame(width: 100)
                         .onChange(of: rule.op) { _ in isDirty = true }
 
                         TextField("value", text: $rule.value)

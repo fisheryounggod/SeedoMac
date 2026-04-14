@@ -3,8 +3,8 @@ import Foundation
 import GRDB
 
 struct CategoryRuleEntry: Codable {
-    var field: String   // "app" | "title"
-    var op: String      // "contains" | "equals"
+    var field: String   // "app" | "title" | "url"
+    var op: String      // "contains" | "equals" | "starts_with"
     var value: String
 }
 
@@ -42,9 +42,9 @@ final class CategoryStore {
         try save(cats[idx])
     }
 
-    /// Matches the first category whose rules satisfy (appName, title).
+    /// Matches the first category whose rules satisfy (appName, title, url).
     /// OR logic across rules within a category; categories checked in insertion order.
-    func matchCategory(for appName: String, title: String) throws -> Category? {
+    func matchCategory(for appName: String, title: String, url: String = "") throws -> Category? {
         let cats = try allCategories()
         let decoder = JSONDecoder()
         for cat in cats {
@@ -57,20 +57,35 @@ final class CategoryStore {
                 continue
             }
             for rule in rules {
-                let target: String
+                var match = false
                 switch rule.field {
-                case "app":   target = appName
-                case "title": target = title
-                default:      continue
-                }
-                switch rule.op {
-                case "contains":
-                    if target.localizedCaseInsensitiveContains(rule.value) { return cat }
-                case "equals":
-                    if target.caseInsensitiveCompare(rule.value) == .orderedSame { return cat }
+                case "app":
+                    let value = appName
+                    switch rule.op {
+                    case "contains":    match = value.localizedCaseInsensitiveContains(rule.value)
+                    case "equals":      match = value.caseInsensitiveCompare(rule.value) == .orderedSame
+                    case "starts_with": match = value.lowercased().hasPrefix(rule.value.lowercased())
+                    default: break
+                    }
+                case "title":
+                    let value = title
+                    switch rule.op {
+                    case "contains":    match = value.localizedCaseInsensitiveContains(rule.value)
+                    case "equals":      match = value.caseInsensitiveCompare(rule.value) == .orderedSame
+                    case "starts_with": match = value.lowercased().hasPrefix(rule.value.lowercased())
+                    default: break
+                    }
+                case "url":
+                    switch rule.op {
+                    case "contains":    match = url.localizedCaseInsensitiveContains(rule.value)
+                    case "equals":      match = url.caseInsensitiveCompare(rule.value) == .orderedSame
+                    case "starts_with": match = url.lowercased().hasPrefix(rule.value.lowercased())
+                    default: break
+                    }
                 default:
                     continue
                 }
+                if match { return cat }
             }
         }
         return nil

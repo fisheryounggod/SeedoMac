@@ -7,6 +7,7 @@ final class AppState: ObservableObject {
     @Published var isTracking: Bool = true
     @Published var currentApp: String = ""
     @Published var currentTitle: String = ""
+    @Published var currentURL: String = ""
     @Published var currentSessionStartMs: Int64 = 0
 
     // Today summary (refreshed every 5s)

@@ -14,9 +14,12 @@ final class SessionBuffer {
         self.flushHandler = flushHandler
     }
 
-    func process(app: String, title: String, bundleId: String, nowMs: Int64) {
+    func process(app: String, title: String, url: String, bundleId: String, nowMs: Int64) {
         queue.sync {
-            let sameSession = _currentEvent.map { $0.appOrDomain == app && $0.title == title } ?? false
+            let currentURL = _currentEvent?.url ?? ""
+            let sameSession = _currentEvent.map {
+                $0.appOrDomain == app && $0.title == title && currentURL == url
+            } ?? false
 
             if sameSession {
                 _currentEvent?.endTs = nowMs
@@ -24,8 +27,10 @@ final class SessionBuffer {
                 if let finished = _currentEvent {
                     _pending.append(finished)
                 }
-                _currentEvent = Event(startTs: nowMs, endTs: nowMs, appOrDomain: app,
-                                      bundleId: bundleId.isEmpty ? nil : bundleId, title: title)
+                var newEvent = Event(startTs: nowMs, endTs: nowMs, appOrDomain: app,
+                                     bundleId: bundleId.isEmpty ? nil : bundleId, title: title)
+                newEvent.url = url.isEmpty ? nil : url
+                _currentEvent = newEvent
                 if _pending.count >= 10 {
                     let toFlush = _pending
                     _pending.removeAll()

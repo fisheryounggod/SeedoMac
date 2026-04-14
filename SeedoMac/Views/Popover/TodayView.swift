@@ -93,6 +93,13 @@ struct TodayView: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
+                    if !appState.currentURL.isEmpty,
+                       let domain = BrowserURLProvider.domain(from: appState.currentURL) {
+                        Text(domain)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
                 Spacer()
                 Text(formatDuration(appState.currentDurationSecs))

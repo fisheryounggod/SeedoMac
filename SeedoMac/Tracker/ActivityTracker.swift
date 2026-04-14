@@ -77,14 +77,23 @@ final class ActivityTracker {
         let rawTitle = WindowInfoProvider.getTitle(pid: pid) ?? ""
         let title    = appState.isRedactTitles ? "" : rawTitle
 
+        // URL extraction for browser apps (only when not redacting)
+        let currentURL: String
+        if !appState.isRedactTitles && BrowserURLProvider.isBrowser(bundleId: bundleId) {
+            currentURL = BrowserURLProvider.getURL(pid: pid, bundleId: bundleId) ?? ""
+        } else {
+            currentURL = ""
+        }
+
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-        buffer.process(app: appName, title: title, bundleId: bundleId, nowMs: nowMs)
+        buffer.process(app: appName, title: title, url: currentURL, bundleId: bundleId, nowMs: nowMs)
 
         // Update shared state on main thread for UI
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.appState.currentApp = appName
             self.appState.currentTitle = title
+            self.appState.currentURL = currentURL
             // Only update session start if the buffer's current event is still for the same app
             if self.buffer.currentEvent?.appOrDomain == appName {
                 self.appState.currentSessionStartMs = self.buffer.currentEvent?.startTs ?? nowMs
