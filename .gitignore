@@ -21,3 +21,6 @@ Pods/
 # macOS
 .DS_Store
 *.DS_Store
+
+# Xcode export/signing config (local only)
+ExportOptions.plist
