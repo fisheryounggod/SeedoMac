@@ -141,3 +141,13 @@ struct HeatmapDay: Identifiable {
     var weekIndex: Int      // 0-based week column in the year grid
     var weekdayIndex: Int   // 0=Mon … 6=Sun
 }
+
+// MARK: - Shared Helpers
+
+/// Formats a duration in seconds to "Xh Ym" or "Ym" string.
+func formatDuration(_ secs: Double) -> String {
+    let h = Int(secs) / 3600
+    let m = (Int(secs) % 3600) / 60
+    if h > 0 { return "\(h)h \(m)m" }
+    return "\(m)m"
+}

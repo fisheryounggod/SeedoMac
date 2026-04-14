@@ -17,6 +17,9 @@ struct StatsView: View {
     @State private var isLoadingAI = false
     @State private var summary: DailySummary?
     @State private var aiError: String? = nil
+    @State private var appCategories: [String: Category?] = [:]
+    @State private var allCats: [Category] = []
+    @State private var assigningApp: String? = nil
 
     var body: some View {
         ScrollView {
@@ -112,10 +115,69 @@ struct StatsView: View {
                         HStack {
                             Text(app.appOrDomain)
                                 .lineLimit(1)
+                                .truncationMode(.middle)
                             Spacer()
+                            // Category badge
+                            let cat = appCategories[app.appOrDomain] ?? nil
+                            Button {
+                                assigningApp = app.appOrDomain
+                            } label: {
+                                Text(cat?.name ?? "Untagged")
+                                    .font(.caption2)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color(hex: cat?.color ?? "#AAAAAA").opacity(0.2))
+                                    .foregroundStyle(Color(hex: cat?.color ?? "#AAAAAA"))
+                                    .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .popover(isPresented: Binding(
+                                get: { assigningApp == app.appOrDomain },
+                                set: { if !$0 { assigningApp = nil } }
+                            )) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Assign Category")
+                                        .font(.headline)
+                                        .padding([.top, .horizontal])
+                                    Divider()
+                                    if allCats.isEmpty {
+                                        Text("No categories defined")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .padding()
+                                    } else {
+                                        ForEach(allCats) { c in
+                                            Button {
+                                                let name = app.appOrDomain
+                                                DispatchQueue.global(qos: .userInitiated).async {
+                                                    try? CategoryStore().assignApp(name, toCategoryId: c.id)
+                                                    DispatchQueue.main.async {
+                                                        assigningApp = nil
+                                                        loadPeriodData()
+                                                    }
+                                                }
+                                            } label: {
+                                                HStack(spacing: 6) {
+                                                    Circle()
+                                                        .fill(Color(hex: c.color))
+                                                        .frame(width: 8, height: 8)
+                                                    Text(c.name)
+                                                }
+                                            }
+                                            .buttonStyle(.plain)
+                                            .padding(.horizontal)
+                                            .padding(.vertical, 2)
+                                        }
+                                    }
+                                    Divider()
+                                    Button("Cancel") { assigningApp = nil }
+                                        .padding([.bottom, .horizontal])
+                                }
+                                .frame(width: 200)
+                            }
                             Text(formatDuration(app.totalSecs))
                                 .foregroundStyle(.secondary)
-                                .font(.caption)
+                                .monospacedDigit()
                         }
                         .padding(.vertical, 4)
                         Divider()
@@ -180,9 +242,17 @@ struct StatsView: View {
         DispatchQueue.global(qos: .userInitiated).async {
             let apps = (try? EventStore().topApps(startMs: startMs, endMs: endMs)) ?? []
             let cats = buildCategoryStats(apps: apps)
+            let catStore2 = CategoryStore()
+            let allCategories = (try? catStore2.allCategories()) ?? []
+            var catMap: [String: Category?] = [:]
+            for app in apps {
+                catMap[app.appOrDomain] = try? catStore2.matchCategory(for: app.appOrDomain, title: "")
+            }
             DispatchQueue.main.async {
                 self.periodApps = apps
                 self.periodCats = cats
+                self.allCats = allCategories
+                self.appCategories = catMap
             }
         }
     }
@@ -258,9 +328,4 @@ struct StatsView: View {
         }
     }
 
-    private func formatDuration(_ secs: Double) -> String {
-        let h = Int(secs) / 3600
-        let m = (Int(secs) % 3600) / 60
-        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
-    }
 }

@@ -113,7 +113,7 @@ struct OfflineView: View {
                                 .foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Text(formatDuration(secs: act.durationSecs))
+                            Text(formatDuration(Double(act.durationSecs)))
                                 .foregroundStyle(.secondary)
                         }
                         .swipeActions(edge: .trailing) {
@@ -164,11 +164,4 @@ struct OfflineView: View {
         loadActivities()
     }
 
-    // MARK: - Helpers
-
-    private func formatDuration(secs: Int64) -> String {
-        let h = Int(secs) / 3600
-        let m = (Int(secs) % 3600) / 60
-        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
-    }
 }

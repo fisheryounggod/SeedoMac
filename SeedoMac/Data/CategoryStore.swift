@@ -29,6 +29,19 @@ final class CategoryStore {
         }
     }
 
+    /// Appends an "app equals appName" rule to the given category. No-op if the rule already exists.
+    func assignApp(_ appName: String, toCategoryId categoryId: String) throws {
+        var cats = try allCategories()
+        guard let idx = cats.firstIndex(where: { $0.id == categoryId }) else { return }
+        var entries = (try? JSONDecoder().decode([CategoryRuleEntry].self,
+                                                 from: Data(cats[idx].rules.utf8))) ?? []
+        guard !entries.contains(where: { $0.field == "app" && $0.op == "equals" && $0.value == appName })
+        else { return }
+        entries.append(CategoryRuleEntry(field: "app", op: "equals", value: appName))
+        cats[idx].rules = (try? String(data: JSONEncoder().encode(entries), encoding: .utf8)) ?? "[]"
+        try save(cats[idx])
+    }
+
     /// Matches the first category whose rules satisfy (appName, title).
     /// OR logic across rules within a category; categories checked in insertion order.
     func matchCategory(for appName: String, title: String) throws -> Category? {

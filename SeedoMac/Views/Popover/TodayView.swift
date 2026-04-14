@@ -184,10 +184,3 @@ extension Color {
     }
 }
 
-// MARK: - Shared Helpers
-
-fileprivate func formatDuration(_ secs: Double) -> String {
-    let h = Int(secs) / 3600
-    let m = (Int(secs) % 3600) / 60
-    return h > 0 ? "\(h)h \(m)m" : "\(m)m"
-}
