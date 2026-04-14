@@ -43,4 +43,22 @@ final class OfflineStore {
     func summary(for date: String) throws -> DailySummary? {
         try db.read { d in try DailySummary.fetchOne(d, key: date) }
     }
+
+    /// All DailySummary rows, newest first.
+    func allSummaries() throws -> [DailySummary] {
+        try db.read { d in
+            try DailySummary.order(Column("date").desc).fetchAll(d)
+        }
+    }
+
+    /// Distinct calendar days (YYYY-MM-DD) that have offline activities, newest first.
+    func allActivityDates() throws -> [String] {
+        try db.read { d in
+            let rows = try Row.fetchAll(d, sql: """
+                SELECT DISTINCT strftime('%Y-%m-%d', start_ts / 1000, 'unixepoch', 'localtime') AS day
+                FROM offline_activities ORDER BY day DESC
+            """)
+            return rows.map { $0["day"] as String }
+        }
+    }
 }

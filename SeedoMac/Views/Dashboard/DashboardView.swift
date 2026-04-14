@@ -5,7 +5,7 @@ enum DashboardTab: String, CaseIterable {
     case stats      = "Stats"
     case categories = "Categories"
     case timeline   = "Timeline"
-    case offline    = "Offline"
+    case offline    = "Log"
     case settings   = "Settings"
 
     var icon: String {
@@ -13,7 +13,7 @@ enum DashboardTab: String, CaseIterable {
         case .stats:      return "chart.bar.fill"
         case .categories: return "tag.fill"
         case .timeline:   return "chart.bar.xaxis"
-        case .offline:    return "pencil.and.list.clipboard"
+        case .offline:    return "text.book.closed.fill"
         case .settings:   return "gearshape.fill"
         }
     }

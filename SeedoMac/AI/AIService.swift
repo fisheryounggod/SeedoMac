@@ -70,6 +70,7 @@ final class AIService {
             let summary = self.parseSummary(date: date, content: content)
             do {
                 try OfflineStore().saveSummary(summary)
+                NotificationCenter.default.post(name: .dailySummaryDidSave, object: nil)
             } catch {
                 print("[AI] Failed to persist summary: \(error)")
             }
@@ -121,6 +122,10 @@ final class AIService {
             createdAt: Int64(Date().timeIntervalSince1970 * 1000)
         )
     }
+}
+
+extension Notification.Name {
+    static let dailySummaryDidSave = Notification.Name("tech.seedo.dailySummaryDidSave")
 }
 
 enum AIError: LocalizedError {
