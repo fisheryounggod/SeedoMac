@@ -15,6 +15,7 @@ struct CategoryView: View {
     @State private var editName: String = ""
     @State private var editColor: String = "#4A90D9"
     @State private var editRules: [RuleEntry] = []
+    @State private var editIncludeInStats: Bool = true
     @State private var isDirty = false
 
     private let store = CategoryStore()
@@ -100,6 +101,11 @@ struct CategoryView: View {
                 .labelsHidden()
             }
 
+            // Include in stats toggle
+            Toggle("Include in statistics", isOn: $editIncludeInStats)
+                .onChange(of: editIncludeInStats) { _ in isDirty = true }
+                .help("When off, apps matched to this category are hidden from Stats totals and top-apps list. Useful for system-background categories.")
+
             // Rules
             Text("Match Rules (OR logic)")
                 .font(.caption)
@@ -168,11 +174,13 @@ struct CategoryView: View {
 
     private func loadEdit(_ cat: Category?) {
         guard let cat else {
-            editRules = []; editName = ""; editColor = "#4A90D9"; isDirty = false
+            editRules = []; editName = ""; editColor = "#4A90D9"
+            editIncludeInStats = true; isDirty = false
             return
         }
         editName  = cat.name
         editColor = cat.color
+        editIncludeInStats = cat.includeInStats
         let data  = Data(cat.rules.utf8)
         editRules = (try? JSONDecoder().decode([RuleEntry].self, from: data)) ?? []
         isDirty   = false
@@ -197,6 +205,7 @@ struct CategoryView: View {
         guard var cat = selected else { return }
         cat.name  = editName
         cat.color = editColor
+        cat.includeInStats = editIncludeInStats
         // Strip UUID before encoding (only store field/op/value)
         let stripped = editRules.map {
             CategoryRuleEntry(field: $0.field, op: $0.op, value: $0.value)

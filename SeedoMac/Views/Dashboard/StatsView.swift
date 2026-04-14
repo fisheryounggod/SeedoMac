@@ -238,18 +238,32 @@ struct StatsView: View {
     }
 
     private func loadPeriodData() {
+        // top-level range request — fetch raw apps then filter excluded categories
         let (startMs, endMs) = periodRange()
+        // Pull a bigger window than the top-10 limit so filtering still yields 10 apps
         DispatchQueue.global(qos: .userInitiated).async {
-            let apps = (try? EventStore().topApps(startMs: startMs, endMs: endMs)) ?? []
-            let cats = buildCategoryStats(apps: apps)
+            let rawApps = (try? EventStore().topApps(startMs: startMs, endMs: endMs, limit: 50)) ?? []
             let catStore2 = CategoryStore()
             let allCategories = (try? catStore2.allCategories()) ?? []
+
+            // Build per-app category map once, reuse for filter + display
             var catMap: [String: Category?] = [:]
-            for app in apps {
+            for app in rawApps {
                 catMap[app.appOrDomain] = try? catStore2.matchCategory(for: app.appOrDomain, title: "")
             }
+
+            // Drop apps whose matched category is excluded from stats
+            let includedApps = rawApps.filter { app in
+                if let cat = catMap[app.appOrDomain] ?? nil, cat.includeInStats == false {
+                    return false
+                }
+                return true
+            }
+            let limitedApps = Array(includedApps.prefix(10))
+            let cats = buildCategoryStats(apps: includedApps, catMap: catMap)
+
             DispatchQueue.main.async {
-                self.periodApps = apps
+                self.periodApps = limitedApps
                 self.periodCats = cats
                 self.allCats = allCategories
                 self.appCategories = catMap
@@ -257,11 +271,10 @@ struct StatsView: View {
         }
     }
 
-    private func buildCategoryStats(apps: [AppStat]) -> [CategoryStat] {
-        let catStore = CategoryStore()
+    private func buildCategoryStats(apps: [AppStat], catMap: [String: Category?]) -> [CategoryStat] {
         var totals: [String: (name: String, color: String, secs: Double)] = [:]
         for app in apps {
-            if let cat = try? catStore.matchCategory(for: app.appOrDomain, title: "") {
+            if let cat = catMap[app.appOrDomain] ?? nil, cat.includeInStats {
                 var e = totals[cat.id] ?? (cat.name, cat.color, 0.0)
                 e.secs += app.totalSecs
                 totals[cat.id] = e

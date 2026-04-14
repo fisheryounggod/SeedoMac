@@ -4,7 +4,6 @@ import SwiftUI
 enum DashboardTab: String, CaseIterable {
     case stats      = "Stats"
     case categories = "Categories"
-    case timeline   = "Timeline"
     case offline    = "Log"
     case settings   = "Settings"
 
@@ -12,7 +11,6 @@ enum DashboardTab: String, CaseIterable {
         switch self {
         case .stats:      return "chart.bar.fill"
         case .categories: return "tag.fill"
-        case .timeline:   return "chart.bar.xaxis"
         case .offline:    return "text.book.closed.fill"
         case .settings:   return "gearshape.fill"
         }
@@ -34,7 +32,6 @@ struct DashboardView: View {
             switch selectedTab {
             case .stats:      StatsView(appState: appState)
             case .categories: CategoryView()
-            case .timeline:   TimelineView(appState: appState)
             case .offline:    OfflineView()
             case .settings:   SettingsView(appState: appState)
             }

@@ -99,6 +99,13 @@ final class AppDatabase {
             """)
         }
 
+        migrator.registerMigration("v2_category_include_in_stats") { db in
+            try db.execute(sql: """
+                ALTER TABLE categories
+                ADD COLUMN include_in_stats INTEGER NOT NULL DEFAULT 1;
+            """)
+        }
+
         try migrator.migrate(pool)
     }
 

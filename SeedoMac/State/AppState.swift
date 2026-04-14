@@ -14,7 +14,6 @@ final class AppState: ObservableObject {
     @Published var todayTotalSecs: Double = 0
     @Published var todayCategoryStats: [CategoryStat] = []
     @Published var todayTopApps: [AppStat] = []
-    @Published var todayTimelineEvents: [TimelineEvent] = []
 
     // Permissions
     @Published var hasAccessibilityPermission: Bool = false

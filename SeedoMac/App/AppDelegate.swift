@@ -69,57 +69,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         refreshTodayStats()  // immediate first load
     }
 
-    private static let dayFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        return f
-    }()
-
     private func refreshTodayStats() {
         let store = EventStore()
         let catStore = CategoryStore()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
-            let apps = (try? store.todayStats()) ?? []
-            let total = apps.reduce(0.0) { $0 + $1.totalSecs }
+            let rawApps = (try? store.todayStats()) ?? []
 
-            // Group apps into categories
+            // Filter out apps whose matched category is excluded from stats
+            var includedApps: [AppStat] = []
             var catTotals: [String: (name: String, color: String, secs: Double)] = [:]
-            for app in apps {
-                if let cat = try? catStore.matchCategory(for: app.appOrDomain, title: "") {
+            for app in rawApps {
+                let matched = try? catStore.matchCategory(for: app.appOrDomain, title: "")
+                if let cat = matched, cat.includeInStats == false { continue }
+                includedApps.append(app)
+                if let cat = matched {
                     var entry = catTotals[cat.id] ?? (cat.name, cat.color, 0.0)
                     entry.secs += app.totalSecs
                     catTotals[cat.id] = entry
                 }
             }
+            let total = includedApps.reduce(0.0) { $0 + $1.totalSecs }
             let catStats = catTotals
                 .map { CategoryStat(id: $0.key, name: $0.value.name,
                                     color: $0.value.color, totalSecs: $0.value.secs) }
                 .sorted { $0.totalSecs > $1.totalSecs }
 
-            // Build timeline events
-            let dateStr = AppDelegate.dayFormatter.string(from: Date())
-            let rawEvents = (try? EventStore().eventsForDay(dateStr: dateStr)) ?? []
-            let catStoreForTimeline = CategoryStore()
-            let timeline: [TimelineEvent] = rawEvents.compactMap { ev in
-                guard let id = ev.id else { return nil }
-                let cat = try? catStoreForTimeline.matchCategory(for: ev.appOrDomain, title: ev.title)
-                return TimelineEvent(
-                    id: id,
-                    appOrDomain: ev.appOrDomain,
-                    startTs: ev.startTs,
-                    endTs: ev.endTs,
-                    categoryColor: cat?.color ?? "#888888",
-                    categoryName: cat?.name
-                )
-            }
-
             DispatchQueue.main.async {
                 self.appState.todayTotalSecs = total
                 self.appState.todayCategoryStats = catStats
-                self.appState.todayTopApps = Array(apps.prefix(10))
-                self.appState.todayTimelineEvents = timeline
+                self.appState.todayTopApps = Array(includedApps.prefix(10))
 
                 // Update menu bar title
                 let hrs  = Int(total) / 3600

@@ -48,8 +48,17 @@ struct Category: Identifiable, Codable, Hashable, Equatable, FetchableRecord, Pe
     var name: String
     var color: String = "#4A90D9"
     var rules: String = "[]"  // JSON: [{field: String, op: String, value: String}]
+    var includeInStats: Bool = true
 
     static let databaseTableName = "categories"
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case color
+        case rules
+        case includeInStats = "include_in_stats"
+    }
 }
 
 struct CategoryRule: Codable, FetchableRecord, PersistableRecord {
@@ -150,13 +159,4 @@ func formatDuration(_ secs: Double) -> String {
     let m = (Int(secs) % 3600) / 60
     if h > 0 { return "\(h)h \(m)m" }
     return "\(m)m"
-}
-
-struct TimelineEvent: Identifiable {
-    var id: Int64
-    var appOrDomain: String
-    var startTs: Int64    // Unix ms
-    var endTs: Int64      // Unix ms
-    var categoryColor: String   // hex, e.g. "#4A90D9"
-    var categoryName: String?
 }
