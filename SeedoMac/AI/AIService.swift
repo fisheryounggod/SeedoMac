@@ -2,9 +2,9 @@
 import Foundation
 
 private let systemPrompt = """
-你是一位专注效率教练。根据用户今日的电脑使用数据，生成一份简洁的工作复盘（200字以内）。
-包含：1）今日专注亮点；2）时间分配问题；3）明日一个具体改进建议。
-最后给出今日专注评分（1-5分）和3个关键词，格式（必须在回复最后）：
+你是一位专注效率教练。根据用户提供的某一时间段（今天、本周、本月、本年或自定义区间）的电脑使用数据，生成一份简洁的工作复盘（200字以内）。
+包含：1）该时段的专注亮点；2）时间分配问题；3）一个具体改进建议。
+最后给出该时段的专注评分（1-5分）和3个关键词，格式（必须在回复最后）：
 SCORE: X
 KEYWORDS: 关键词1, 关键词2, 关键词3
 """
@@ -20,8 +20,11 @@ final class AIService {
         AppDatabase.shared.setting(for: "ai_model") ?? "gpt-4o-mini"
     }
 
-    func generateDailySummary(
-        date: String,
+    /// Generates a summary for the given period (does NOT persist). Caller decides whether
+    /// to save via `persistSummary(_:)` — this enables the "Save to Log?" confirmation prompt.
+    func generateSummary(
+        periodKey: String,
+        periodLabel: String,
         apps: [AppStat],
         categories: [CategoryStat],
         totalSecs: Double,
@@ -32,7 +35,10 @@ final class AIService {
             return
         }
 
-        let userContent = buildPrompt(date: date, apps: apps, categories: categories, totalSecs: totalSecs)
+        let userContent = buildPrompt(
+            periodLabel: periodLabel,
+            apps: apps, categories: categories, totalSecs: totalSecs
+        )
         let body: [String: Any] = [
             "model": model,
             "stream": false,
@@ -66,24 +72,24 @@ final class AIService {
                   let content = message["content"] as? String else {
                 completion(.failure(AIError.badResponse)); return
             }
-
-            let summary = self.parseSummary(date: date, content: content)
-            do {
-                try OfflineStore().saveSummary(summary)
-                NotificationCenter.default.post(name: .dailySummaryDidSave, object: nil)
-            } catch {
-                print("[AI] Failed to persist summary: \(error)")
-            }
+            let summary = self.parseSummary(date: periodKey, content: content)
             completion(.success(summary))
         }.resume()
     }
 
+    /// Persists a summary (overwriting any existing row with the same date/periodKey)
+    /// and posts `.dailySummaryDidSave` so the Log view can refresh.
+    func persistSummary(_ summary: DailySummary) throws {
+        try OfflineStore().saveSummary(summary)
+        NotificationCenter.default.post(name: .dailySummaryDidSave, object: nil)
+    }
+
     // MARK: - Helpers
 
-    private func buildPrompt(date: String, apps: [AppStat], categories: [CategoryStat], totalSecs: Double) -> String {
+    private func buildPrompt(periodLabel: String, apps: [AppStat], categories: [CategoryStat], totalSecs: Double) -> String {
         let h = Int(totalSecs) / 3600
         let m = (Int(totalSecs) % 3600) / 60
-        var lines = ["日期：\(date)", "总使用时长：\(h)h \(m)m", "", "按分类："]
+        var lines = ["时间范围：\(periodLabel)", "总使用时长：\(h)h \(m)m", "", "按分类："]
         for cat in categories {
             let pct = totalSecs > 0 ? Int(cat.totalSecs / totalSecs * 100) : 0
             let ch = Int(cat.totalSecs) / 3600

@@ -22,6 +22,8 @@ struct StatsView: View {
     @State private var periodCats: [CategoryStat] = []
     @State private var isLoadingAI = false
     @State private var summary: DailySummary?
+    @State private var pendingSummary: DailySummary? = nil
+    @State private var showSavePrompt: Bool = false
     @State private var aiError: String? = nil
     @State private var appCategories: [String: Category?] = [:]
     @State private var allCats: [Category] = []
@@ -214,7 +216,7 @@ struct StatsView: View {
     }
 
     private var aiSummarySection: some View {
-        GroupBox("AI Daily Summary") {
+        GroupBox("AI Summary") {
             VStack(alignment: .leading, spacing: 8) {
                 if let s = summary, !s.content.isEmpty {
                     Text(s.content)
@@ -237,12 +239,39 @@ struct StatsView: View {
                 if let err = aiError {
                     Text(err).foregroundStyle(.red).font(.caption)
                 }
-                Button(isLoadingAI ? "Generating…" : "Generate Today's Summary") {
+                Button(isLoadingAI ? "Generating…" : "Generate \(period.rawValue) Summary") {
                     generateAISummary()
                 }
                 .disabled(isLoadingAI)
                 .buttonStyle(.bordered)
             }
+        }
+        .alert("Save Summary to Log?", isPresented: $showSavePrompt, presenting: pendingSummary) { s in
+            Button("Save") {
+                DispatchQueue.global(qos: .userInitiated).async {
+                    do {
+                        try AIService.shared.persistSummary(s)
+                        DispatchQueue.main.async {
+                            // If this was today's summary, reflect it immediately in the card
+                            if s.date == Self.dateFormatter.string(from: Date()) {
+                                self.summary = s
+                            }
+                            self.pendingSummary = nil
+                        }
+                    } catch {
+                        DispatchQueue.main.async {
+                            self.aiError = "Failed to save: \(error.localizedDescription)"
+                            self.pendingSummary = nil
+                        }
+                    }
+                }
+            }
+            Button("Discard", role: .cancel) { self.pendingSummary = nil }
+        } message: { s in
+            let preview = s.content.count > 240
+                ? String(s.content.prefix(240)) + "…"
+                : s.content
+            Text("[\(period.rawValue)] score \(s.score)/5\n\n\(preview)")
         }
     }
 
@@ -324,19 +353,50 @@ struct StatsView: View {
         aiError = nil
         let apps = periodApps
         let total = apps.reduce(0.0) { $0 + $1.totalSecs }
-        let cats  = periodCats   // already computed on background queue in loadPeriodData()
-        let date  = Self.dateFormatter.string(from: Date())
+        let cats  = periodCats
+        let key   = periodKey()
+        let label = periodLabel()
 
-        AIService.shared.generateDailySummary(
-            date: date, apps: apps, categories: cats, totalSecs: total
+        AIService.shared.generateSummary(
+            periodKey: key, periodLabel: label,
+            apps: apps, categories: cats, totalSecs: total
         ) { result in
             DispatchQueue.main.async {
                 self.isLoadingAI = false
                 switch result {
-                case .success(let s): self.summary = s
-                case .failure(let e): self.aiError = e.localizedDescription
+                case .success(let s):
+                    self.pendingSummary = s
+                    self.showSavePrompt = true
+                case .failure(let e):
+                    self.aiError = e.localizedDescription
                 }
             }
+        }
+    }
+
+    /// Period identifier used as the `DailySummary.date` primary key.
+    /// - .today  → "YYYY-MM-DD" (single date, backward-compatible)
+    /// - others  → "YYYY-MM-DD..YYYY-MM-DD" range syntax
+    private func periodKey() -> String {
+        let (startMs, endMs) = periodRange()
+        let startDate = Date(timeIntervalSince1970: Double(startMs) / 1000)
+        let endDate   = Date(timeIntervalSince1970: Double(endMs)   / 1000)
+        let startStr  = Self.dateFormatter.string(from: startDate)
+        let endStr    = Self.dateFormatter.string(from: endDate)
+        if startStr == endStr { return startStr }
+        return "\(startStr)..\(endStr)"
+    }
+
+    private func periodLabel() -> String {
+        switch period {
+        case .today:  return "Today"
+        case .week:   return "Past 7 days"
+        case .month:  return "Past month"
+        case .year:   return "Past year"
+        case .custom:
+            let s = Self.dateFormatter.string(from: customStart)
+            let e = Self.dateFormatter.string(from: customEnd)
+            return "\(s) — \(e)"
         }
     }
 

@@ -244,7 +244,7 @@ struct OfflineView: View {
     private func summaryRow(_ s: DailySummary) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(s.date)
+                Text(Self.formatSummaryDateKey(s.date))
                     .font(.headline)
                 Spacer()
                 if s.score > 0 {
@@ -268,6 +268,32 @@ struct OfflineView: View {
         .padding(.vertical, 4)
     }
 
+    /// Formats a DailySummary.date primary key for display.
+    /// - "YYYY-MM-DD" → returned as-is (today-style single date)
+    /// - "YYYY-MM-DD..YYYY-MM-DD" → "MMM d – MMM d, YYYY" (period-style range)
+    private static func formatSummaryDateKey(_ key: String) -> String {
+        let parts = key.components(separatedBy: "..")
+        guard parts.count == 2,
+              let startDate = dayFormatter.date(from: parts[0]),
+              let endDate   = dayFormatter.date(from: parts[1]) else {
+            return key
+        }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        let startCal = Calendar.current.dateComponents([.year], from: startDate)
+        let endCal   = Calendar.current.dateComponents([.year], from: endDate)
+        if startCal.year == endCal.year {
+            f.dateFormat = "MMM d"
+            let s = f.string(from: startDate)
+            f.dateFormat = "MMM d, yyyy"
+            let e = f.string(from: endDate)
+            return "\(s) – \(e)"
+        } else {
+            f.dateFormat = "MMM d, yyyy"
+            return "\(f.string(from: startDate)) – \(f.string(from: endDate))"
+        }
+    }
+
     // MARK: - Actions
 
     private func loadActivities() {
@@ -283,10 +309,10 @@ struct OfflineView: View {
             let summaries = (try? store.allSummaries()) ?? []
             let actDates  = (try? store.allActivityDates()) ?? []
 
-            // Build sorted date set
+            // Build sorted date set — for range-key summaries, sort by end date
             var dateSet = Set<String>(summaries.map(\.date))
             actDates.forEach { dateSet.insert($0) }
-            let sortedDates = dateSet.sorted(by: >)
+            let sortedDates = dateSet.sorted { Self.endDateKey($0) > Self.endDateKey($1) }
 
             // Build JournalEntry list per date
             var entries: [JournalEntry] = []
@@ -304,6 +330,13 @@ struct OfflineView: View {
             }
             DispatchQueue.main.async { journalEntries = entries }
         }
+    }
+
+    /// For range keys "start..end" return "end"; otherwise return the key unchanged.
+    /// Used as the secondary sort key so weekly/monthly summaries sort next to
+    /// activities on their end-of-period date.
+    private static func endDateKey(_ key: String) -> String {
+        key.components(separatedBy: "..").last ?? key
     }
 
     private func saveActivity() {
