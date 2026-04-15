@@ -12,6 +12,17 @@ enum StatsPeriod: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// Plan horizon for the 计划 section at the top of Stats. Each scope maps to
+/// a distinct settings KV key (e.g. `plan_daily:2026-04-15`) so plans carry
+/// over day-to-day, month-to-month, and year-to-year without colliding.
+enum PlanScope: String, CaseIterable, Identifiable {
+    case daily   = "日度"
+    case monthly = "月度"
+    case yearly  = "年度"
+
+    var id: String { rawValue }
+}
+
 struct StatsView: View {
     @ObservedObject var appState: AppState
     @State private var period: StatsPeriod = .today
@@ -29,9 +40,15 @@ struct StatsView: View {
     @State private var allCats: [Category] = []
     @State private var assigningApp: String? = nil
 
+    // Plan section (Change E)
+    @State private var planScope: PlanScope = .daily
+    @State private var planContent: String = ""
+    @State private var planStatus: String? = nil
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                planSection
                 heatmapSection
                 periodSelector
                 if period == .custom { customRangePicker }
@@ -43,13 +60,72 @@ struct StatsView: View {
             }
             .padding(20)
         }
-        .onAppear { loadData() }
+        .onAppear {
+            loadData()
+            loadPlan(scope: planScope)
+        }
         .onChange(of: period) { _ in loadPeriodData() }
         .onChange(of: customStart) { _ in if period == .custom { loadPeriodData() } }
         .onChange(of: customEnd)   { _ in if period == .custom { loadPeriodData() } }
+        .onChange(of: planScope) { newScope in
+            // Save outgoing scope's content before switching
+            savePlan(scope: previousPlanScope, content: planContent, silent: true)
+            previousPlanScope = newScope
+            loadPlan(scope: newScope)
+        }
+        .onDisappear {
+            savePlan(scope: planScope, content: planContent, silent: true)
+        }
     }
 
+    /// Tracks the scope before onChange fires so we can persist outgoing content.
+    @State private var previousPlanScope: PlanScope = .daily
+
     // MARK: - Sections
+
+    private var planSection: some View {
+        GroupBox("计划") {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Picker("", selection: $planScope) {
+                        ForEach(PlanScope.allCases) { scope in
+                            Text(scope.rawValue).tag(scope)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 240)
+
+                    Spacer()
+
+                    Text(planScopeLabel(planScope))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                TextEditor(text: $planContent)
+                    .font(.body)
+                    .frame(minHeight: 90, maxHeight: 160)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.secondary.opacity(0.3))
+                    )
+
+                HStack {
+                    if let status = planStatus {
+                        Text(status)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("保存") {
+                        savePlan(scope: planScope, content: planContent, silent: false)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
 
     private var heatmapSection: some View {
         GroupBox("This Year") {
@@ -397,6 +473,72 @@ struct StatsView: View {
             let s = Self.dateFormatter.string(from: customStart)
             let e = Self.dateFormatter.string(from: customEnd)
             return "\(s) — \(e)"
+        }
+    }
+
+    // MARK: - Plan persistence (Change E)
+
+    /// Builds the settings-KV key for a given plan scope. The bucketing date
+    /// stamp rolls automatically: a new day creates a new daily key, a new
+    /// month creates a new monthly key, etc.
+    private func planKey(for scope: PlanScope, on date: Date = Date()) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        switch scope {
+        case .daily:
+            f.dateFormat = "yyyy-MM-dd"
+            return "plan_daily:\(f.string(from: date))"
+        case .monthly:
+            f.dateFormat = "yyyy-MM"
+            return "plan_monthly:\(f.string(from: date))"
+        case .yearly:
+            f.dateFormat = "yyyy"
+            return "plan_yearly:\(f.string(from: date))"
+        }
+    }
+
+    /// Human-readable current-bucket label shown next to the scope picker.
+    private func planScopeLabel(_ scope: PlanScope) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        switch scope {
+        case .daily:
+            f.dateFormat = "yyyy-MM-dd"
+            return f.string(from: Date())
+        case .monthly:
+            f.dateFormat = "yyyy-MM"
+            return f.string(from: Date())
+        case .yearly:
+            f.dateFormat = "yyyy"
+            return f.string(from: Date())
+        }
+    }
+
+    private func loadPlan(scope: PlanScope) {
+        let key = planKey(for: scope)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let content = AppDatabase.shared.setting(for: key) ?? ""
+            DispatchQueue.main.async {
+                self.planContent = content
+            }
+        }
+    }
+
+    /// Persists the given plan content to the settings KV table. `silent=true`
+    /// suppresses the confirmation label so auto-save on scope-switch or view
+    /// disappearance doesn't flash UI text.
+    private func savePlan(scope: PlanScope, content: String, silent: Bool) {
+        let key = planKey(for: scope)
+        DispatchQueue.global(qos: .userInitiated).async {
+            AppDatabase.shared.saveSetting(key: key, value: content)
+            if !silent {
+                DispatchQueue.main.async {
+                    self.planStatus = "已保存 ✓"
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        self.planStatus = nil
+                    }
+                }
+            }
         }
     }
 
