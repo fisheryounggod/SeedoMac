@@ -159,8 +159,14 @@ struct OfflineView: View {
                            displayedComponents: [.hourAndMinute])
                     .labelsHidden()
 
-                Stepper("Duration: \(newDurationMins) min",
-                        value: $newDurationMins, in: 1...480)
+                Text("Duration:")
+                TextField("", value: $newDurationMins, format: .number)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 64)
+                    .multilineTextAlignment(.trailing)
+                Text("min")
+                Stepper("", value: $newDurationMins, in: 1...1440, step: 5)
+                    .labelsHidden()
             }
 
             HStack {
