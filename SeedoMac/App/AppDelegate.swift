@@ -10,6 +10,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var tracker: ActivityTracker!
     private var refreshTimer: Timer?
     private var obsidianImportTimer: Timer?
+    private var autoSummaryTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         loadSettings()
@@ -17,6 +18,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         startTracker()
         scheduleUIRefresh()
         scheduleObsidianAutoImport()
+        scheduleAutoDailySummary()
         checkAccessibilityPermission()
     }
 
@@ -95,6 +97,126 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 print("[ObsidianImporter] auto-import: \(count) new activities")
             } catch {
                 print("[ObsidianImporter] auto-import failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    // MARK: - Auto daily AI summary (Change F)
+
+    /// Fires once a minute to see if the configured trigger time has elapsed
+    /// today and the day's summary hasn't been generated yet. Check itself is
+    /// cheap (2 setting reads + 2 date-comp comparisons).
+    private func scheduleAutoDailySummary() {
+        autoSummaryTimer = Timer.scheduledTimer(
+            withTimeInterval: 60, repeats: true
+        ) { [weak self] _ in
+            self?.checkAutoDailySummary()
+        }
+        // Also check immediately in case the app launched after the trigger
+        // time — don't make Fisher wait a minute.
+        checkAutoDailySummary()
+    }
+
+    private static let autoSummaryDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    private func checkAutoDailySummary() {
+        guard AppDatabase.shared.setting(for: "auto_summary_enabled") == "true" else {
+            return
+        }
+        let hour = Int(AppDatabase.shared.setting(for: "auto_summary_hour") ?? "23") ?? 23
+        let minute = Int(AppDatabase.shared.setting(for: "auto_summary_minute") ?? "0") ?? 0
+
+        let now = Date()
+        let todayStr = Self.autoSummaryDateFormatter.string(from: now)
+        let lastRun = AppDatabase.shared.setting(for: "auto_summary_last_run_day") ?? ""
+        guard lastRun != todayStr else { return }
+
+        let comps = Calendar.current.dateComponents([.hour, .minute], from: now)
+        let nowMinutes = (comps.hour ?? 0) * 60 + (comps.minute ?? 0)
+        let targetMinutes = hour * 60 + minute
+        guard nowMinutes >= targetMinutes else { return }
+
+        // Mark as run BEFORE kicking off the job so a failure doesn't retry
+        // every minute. Fisher can manually retry via the Stats tab.
+        AppDatabase.shared.saveSetting(key: "auto_summary_last_run_day", value: todayStr)
+
+        runAutoDailySummary(todayKey: todayStr)
+    }
+
+    /// Builds today's app/category/total data using the same pipeline as
+    /// StatsView (with excluded-category filtering), calls AIService, and
+    /// persists the result silently on success.
+    private func runAutoDailySummary(todayKey: String) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let cal = Calendar.current
+            let now = Date()
+            let start = cal.startOfDay(for: now)
+            let startMs = Int64(start.timeIntervalSince1970 * 1000)
+            let endMs = Int64(now.timeIntervalSince1970 * 1000)
+
+            let rawApps = (try? EventStore().topApps(
+                startMs: startMs, endMs: endMs, limit: 50
+            )) ?? []
+            let catStore = CategoryStore()
+
+            // Match + filter excluded categories, same semantics as refreshTodayStats
+            var catMap: [String: Category?] = [:]
+            for app in rawApps {
+                catMap[app.appOrDomain] = try? catStore.matchCategory(
+                    for: app.appOrDomain, title: ""
+                )
+            }
+            let includedApps = rawApps.filter { app in
+                if let cat = catMap[app.appOrDomain] ?? nil, cat.includeInStats == false {
+                    return false
+                }
+                return true
+            }
+            let limitedApps = Array(includedApps.prefix(10))
+
+            // Build category totals over the INCLUDED apps only
+            var catTotals: [String: (name: String, color: String, secs: Double)] = [:]
+            for app in includedApps {
+                if let cat = catMap[app.appOrDomain] ?? nil, cat.includeInStats {
+                    var entry = catTotals[cat.id] ?? (cat.name, cat.color, 0.0)
+                    entry.secs += app.totalSecs
+                    catTotals[cat.id] = entry
+                }
+            }
+            let catStats: [CategoryStat] = catTotals
+                .map { CategoryStat(id: $0.key, name: $0.value.name,
+                                    color: $0.value.color, totalSecs: $0.value.secs) }
+                .sorted { $0.totalSecs > $1.totalSecs }
+            let totalSecs = includedApps.reduce(0.0) { $0 + $1.totalSecs }
+
+            print("[AutoSummary] firing for \(todayKey) — \(limitedApps.count) apps, \(catStats.count) cats")
+
+            AIService.shared.generateSummary(
+                periodKey: todayKey,
+                periodLabel: "Today",
+                apps: limitedApps,
+                categories: catStats,
+                totalSecs: totalSecs
+            ) { result in
+                switch result {
+                case .success(let summary):
+                    do {
+                        try AIService.shared.persistSummary(summary)
+                        print("[AutoSummary] saved for \(todayKey)")
+                    } catch {
+                        print("[AutoSummary] persist failed: \(error.localizedDescription)")
+                    }
+                case .failure(let error):
+                    print("[AutoSummary] generate failed: \(error.localizedDescription)")
+                    // Rollback the last-run marker so the next tick retries
+                    // on failure (e.g., transient API outage).
+                    AppDatabase.shared.saveSetting(key: "auto_summary_last_run_day", value: "")
+                }
             }
         }
     }

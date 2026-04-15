@@ -22,6 +22,10 @@ struct SettingsView: View {
     @State private var obsidianAutoImport: Bool = false
     @State private var obsidianImportStatus: String? = nil
 
+    // Auto daily AI summary
+    @State private var autoSummaryEnabled: Bool = false
+    @State private var autoSummaryTime: Date = SettingsView.defaultAutoSummaryTime()
+
     private let providers = [
         ("openai",   "OpenAI",   "https://api.openai.com/v1"),
         ("deepseek", "DeepSeek", "https://api.deepseek.com/v1"),
@@ -59,6 +63,29 @@ struct SettingsView: View {
                     }
                     Button(apiKeyMasked ? "Show" : "Hide") { apiKeyMasked.toggle() }
                         .buttonStyle(.borderless)
+                }
+            }
+
+            // Auto daily AI summary — triggers AIService.generateSummary for
+            // today + persists silently at the configured time.
+            Section("自动日度 AI 总结") {
+                Toggle("每日自动生成今日 AI 总结", isOn: $autoSummaryEnabled)
+
+                if autoSummaryEnabled {
+                    HStack {
+                        Text("触发时间")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        DatePicker("",
+                                   selection: $autoSummaryTime,
+                                   displayedComponents: [.hourAndMinute])
+                            .datePickerStyle(.compact)
+                            .labelsHidden()
+                        Spacer()
+                    }
+                    Text("每天在指定时间用今日数据生成 AI 总结，并自动保存到日志。无需确认。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -181,6 +208,11 @@ struct SettingsView: View {
         autostartEnabled = (SMAppService.mainApp.status == .enabled)
         obsidianVaultPath = AppDatabase.shared.setting(for: "obsidian_vault_path") ?? ""
         obsidianAutoImport = (AppDatabase.shared.setting(for: "obsidian_auto_import") == "true")
+        autoSummaryEnabled = (AppDatabase.shared.setting(for: "auto_summary_enabled") == "true")
+        autoSummaryTime = Self.parseTimeOfDay(
+            hour: AppDatabase.shared.setting(for: "auto_summary_hour"),
+            minute: AppDatabase.shared.setting(for: "auto_summary_minute")
+        )
         // Infer provider from loaded URL
         if let match = providers.first(where: { $0.2 == baseURL }) {
             provider = match.0
@@ -202,6 +234,13 @@ struct SettingsView: View {
         AppDatabase.shared.saveSetting(key: "obsidian_vault_path", value: obsidianVaultPath)
         AppDatabase.shared.saveSetting(key: "obsidian_auto_import",
                                        value: obsidianAutoImport ? "true" : "false")
+        AppDatabase.shared.saveSetting(key: "auto_summary_enabled",
+                                       value: autoSummaryEnabled ? "true" : "false")
+        let comps = Calendar.current.dateComponents([.hour, .minute], from: autoSummaryTime)
+        AppDatabase.shared.saveSetting(key: "auto_summary_hour",
+                                       value: String(comps.hour ?? 23))
+        AppDatabase.shared.saveSetting(key: "auto_summary_minute",
+                                       value: String(comps.minute ?? 0))
         appState.afkThresholdSecs = afkMinutes * 60
         NotificationCenter.default.post(name: .settingsDidSave, object: nil)
         saveStatus = "Saved ✓"
@@ -276,5 +315,25 @@ struct SettingsView: View {
             print("[Autostart] Failed: \(error)")
             autostartEnabled = !enable  // revert on failure
         }
+    }
+
+    // MARK: - Auto summary time helpers
+
+    /// Default trigger time when no value has been saved (23:00 — end of day).
+    private static func defaultAutoSummaryTime() -> Date {
+        var comps = DateComponents()
+        comps.hour = 23
+        comps.minute = 0
+        return Calendar.current.date(from: comps) ?? Date()
+    }
+
+    /// Builds a `Date` from persisted hour/minute strings so SwiftUI's
+    /// DatePicker has something to bind to. Date portion is today (irrelevant
+    /// — only the time component is used).
+    private static func parseTimeOfDay(hour: String?, minute: String?) -> Date {
+        var comps = DateComponents()
+        comps.hour = Int(hour ?? "23") ?? 23
+        comps.minute = Int(minute ?? "0") ?? 0
+        return Calendar.current.date(from: comps) ?? defaultAutoSummaryTime()
     }
 }
