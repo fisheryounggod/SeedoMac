@@ -9,12 +9,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let appState = AppState()
     private var tracker: ActivityTracker!
     private var refreshTimer: Timer?
+    private var obsidianImportTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         loadSettings()
         setupMenuBar()
         startTracker()
         scheduleUIRefresh()
+        scheduleObsidianAutoImport()
         checkAccessibilityPermission()
     }
 
@@ -53,12 +55,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func startTracker() {
         tracker = ActivityTracker(appState: appState)
         tracker.start()
-        // Re-sync cached settings whenever the user saves settings
+        // Re-sync cached settings whenever the user saves settings; also
+        // kick off an Obsidian import in case the toggle just flipped on.
         NotificationCenter.default.addObserver(
             forName: .settingsDidSave, object: nil, queue: .main
         ) { [weak self] _ in
             guard let self else { return }
             self.tracker.syncSettings(from: self.appState)
+            self.runObsidianImportIfEnabled()
         }
     }
 
@@ -67,6 +71,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.refreshTodayStats()
         }
         refreshTodayStats()  // immediate first load
+    }
+
+    /// Schedules an hourly Obsidian auto-import in addition to an immediate
+    /// run on launch. The import is gated on the `obsidian_auto_import` KV
+    /// setting so it's a no-op until Fisher explicitly opts in.
+    private func scheduleObsidianAutoImport() {
+        runObsidianImportIfEnabled()
+        obsidianImportTimer = Timer.scheduledTimer(
+            withTimeInterval: 3600, repeats: true
+        ) { [weak self] _ in
+            self?.runObsidianImportIfEnabled()
+        }
+    }
+
+    private func runObsidianImportIfEnabled() {
+        guard AppDatabase.shared.setting(for: "obsidian_auto_import") == "true" else {
+            return
+        }
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                let count = try ObsidianImporter.shared.importToday()
+                print("[ObsidianImporter] auto-import: \(count) new activities")
+            } catch {
+                print("[ObsidianImporter] auto-import failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     private func refreshTodayStats() {

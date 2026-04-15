@@ -15,6 +15,7 @@
 		4828FDFFBAE423FBF863F2F8 /* CategoryStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BD7C60572F0CDFFB12AA575 /* CategoryStoreTests.swift */; };
 		50FC18F7A96CFC8D0504023D /* AIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC350BFAA1FA6ACF7E0F5786 /* AIService.swift */; };
 		5484932F294518AD6CAAB9A7 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = B477963932670A2351B614F4 /* KeychainHelper.swift */; };
+		5F98721A77FA81870770DD54 /* ObsidianImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E534998DC7FCEEF2BCBA1662 /* ObsidianImporter.swift */; };
 		763BCF89C5A792B8272F46D1 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BD71117B641177E255EE59A /* DashboardView.swift */; };
 		7830E4870CDD6C4D3A3A6435 /* SessionBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D453037819B5FBF868315BE /* SessionBuffer.swift */; };
 		84CA7227C1231BAF13F3C2E7 /* SeedoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29442D84EA7DE72F1DD96B31 /* SeedoApp.swift */; };
@@ -74,6 +75,7 @@
 		C8E05CFC222A618B0AD92D42 /* EventStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventStoreTests.swift; sourceTree = "<group>"; };
 		E1A08F43E63BA3D7D7546922 /* CategoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryStore.swift; sourceTree = "<group>"; };
 		E4E12F22BB8829626E36CDF4 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		E534998DC7FCEEF2BCBA1662 /* ObsidianImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObsidianImporter.swift; sourceTree = "<group>"; };
 		EF903CE344E90093D6509195 /* TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
 		FC350BFAA1FA6ACF7E0F5786 /* AIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -124,6 +126,7 @@
 				E1A08F43E63BA3D7D7546922 /* CategoryStore.swift */,
 				905EE2B872431ADB77E1993D /* EventStore.swift */,
 				A997F71E37683B014F310042 /* Models.swift */,
+				E534998DC7FCEEF2BCBA1662 /* ObsidianImporter.swift */,
 				062EACBF191E1BA758498E96 /* OfflineStore.swift */,
 			);
 			path = Data;
@@ -323,6 +326,7 @@
 				42A4EE5C069825D5E624351A /* HeatmapView.swift in Sources */,
 				5484932F294518AD6CAAB9A7 /* KeychainHelper.swift in Sources */,
 				BEACA2E0A373EEFD40726407 /* Models.swift in Sources */,
+				5F98721A77FA81870770DD54 /* ObsidianImporter.swift in Sources */,
 				DFC296AE4CBA603EC78EE79F /* OfflineStore.swift in Sources */,
 				BAD1193E4C90B816ED305385 /* OfflineView.swift in Sources */,
 				84CA7227C1231BAF13F3C2E7 /* SeedoApp.swift in Sources */,

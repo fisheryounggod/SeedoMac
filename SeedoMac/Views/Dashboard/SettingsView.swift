@@ -1,6 +1,7 @@
 // SeedoMac/Views/Dashboard/SettingsView.swift
 import SwiftUI
 import ServiceManagement
+import AppKit
 
 struct SettingsView: View {
     @ObservedObject var appState: AppState
@@ -15,6 +16,11 @@ struct SettingsView: View {
 
     // Stats exclusion section
     @State private var allCategories: [Category] = []
+
+    // Obsidian import section
+    @State private var obsidianVaultPath: String = ""
+    @State private var obsidianAutoImport: Bool = false
+    @State private var obsidianImportStatus: String? = nil
 
     private let providers = [
         ("openai",   "OpenAI",   "https://api.openai.com/v1"),
@@ -64,6 +70,33 @@ struct SettingsView: View {
                 }
 
                 Toggle("Redact Window Titles (Privacy)", isOn: $appState.isRedactTitles)
+            }
+
+            // Obsidian daily-note import — parses ` - HH:MM label` lines from
+            // {vault}/sources/diarys/{yyyyMMdd}.md into offline_activities.
+            Section("Obsidian 日记导入") {
+                HStack {
+                    TextField("Vault 路径", text: $obsidianVaultPath)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(true)
+                    Button("选择…") { pickObsidianVault() }
+                }
+                Text("文件路径: {vault}/sources/diarys/{yyyyMMdd}.md")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("启动时 & 每小时自动导入今天的日记",
+                       isOn: $obsidianAutoImport)
+
+                HStack {
+                    Button("立即导入今天") { importObsidianNow() }
+                        .disabled(obsidianVaultPath.isEmpty)
+                    if let status = obsidianImportStatus {
+                        Text(status)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
             // Stats exclusion section — overview of which categories are
@@ -146,6 +179,8 @@ struct SettingsView: View {
         model = AppDatabase.shared.setting(for: "ai_model") ?? "gpt-4o-mini"
         afkMinutes = appState.afkThresholdSecs / 60
         autostartEnabled = (SMAppService.mainApp.status == .enabled)
+        obsidianVaultPath = AppDatabase.shared.setting(for: "obsidian_vault_path") ?? ""
+        obsidianAutoImport = (AppDatabase.shared.setting(for: "obsidian_auto_import") == "true")
         // Infer provider from loaded URL
         if let match = providers.first(where: { $0.2 == baseURL }) {
             provider = match.0
@@ -164,10 +199,48 @@ struct SettingsView: View {
         AppDatabase.shared.saveSetting(key: "ai_model", value: model)
         AppDatabase.shared.saveSetting(key: "afk_threshold_secs", value: String(afkMinutes * 60))
         AppDatabase.shared.saveSetting(key: "redact_titles", value: appState.isRedactTitles ? "true" : "false")
+        AppDatabase.shared.saveSetting(key: "obsidian_vault_path", value: obsidianVaultPath)
+        AppDatabase.shared.saveSetting(key: "obsidian_auto_import",
+                                       value: obsidianAutoImport ? "true" : "false")
         appState.afkThresholdSecs = afkMinutes * 60
         NotificationCenter.default.post(name: .settingsDidSave, object: nil)
         saveStatus = "Saved ✓"
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saveStatus = nil }
+    }
+
+    // MARK: - Obsidian import
+
+    private func pickObsidianVault() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "选择 Obsidian Vault 根目录"
+        if panel.runModal() == .OK, let url = panel.url {
+            obsidianVaultPath = url.path
+        }
+    }
+
+    private func importObsidianNow() {
+        // Persist the currently typed vault path first — importer reads from
+        // settings, not local @State.
+        AppDatabase.shared.saveSetting(key: "obsidian_vault_path", value: obsidianVaultPath)
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let count = try ObsidianImporter.shared.importToday()
+                DispatchQueue.main.async {
+                    obsidianImportStatus = "导入 \(count) 条活动 ✓"
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                        obsidianImportStatus = nil
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    obsidianImportStatus = "失败: \(error.localizedDescription)"
+                }
+            }
+        }
     }
 
     // MARK: - Stats exclusion
