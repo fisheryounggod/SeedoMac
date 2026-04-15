@@ -101,12 +101,15 @@ struct OfflineActivity: Identifiable, Codable, FetchableRecord, MutablePersistab
 
 // MARK: - Daily Summary
 
-struct DailySummary: Codable, FetchableRecord, PersistableRecord {
+struct DailySummary: Identifiable, Codable, FetchableRecord, PersistableRecord {
     var date: String       // YYYY-MM-DD (primary key)
     var content: String = ""
     var score: Int = 0
     var keywords: String = ""   // comma-separated
     var createdAt: Int64
+
+    // Identifiable — uses PK directly so SwiftUI list/sheet bindings work.
+    var id: String { date }
 
     static let databaseTableName = "daily_summaries"
 

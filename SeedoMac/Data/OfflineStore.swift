@@ -40,6 +40,10 @@ final class OfflineStore {
         try db.write { d in try summary.save(d) }
     }
 
+    func deleteSummary(date: String) throws {
+        try db.write { d in _ = try DailySummary.deleteOne(d, key: date) }
+    }
+
     func summary(for date: String) throws -> DailySummary? {
         try db.read { d in try DailySummary.fetchOne(d, key: date) }
     }

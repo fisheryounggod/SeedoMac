@@ -41,6 +41,7 @@ struct OfflineView: View {
 
     // Journal tab state
     @State private var journalEntries: [JournalEntry] = []
+    @State private var editingSummary: DailySummary? = nil
 
     // Shared
     @State private var activeTab: LogTab = .activities
@@ -125,6 +126,14 @@ struct OfflineView: View {
         }
         .onChange(of: activeTab) { tab in
             if tab == .journal { loadJournal() }
+        }
+        .sheet(item: $editingSummary) { summary in
+            SummaryEditorSheet(summary: summary) { updated in
+                saveEditedSummary(updated)
+                editingSummary = nil
+            } onCancel: {
+                editingSummary = nil
+            }
         }
     }
 
@@ -252,9 +261,18 @@ struct OfflineView: View {
                          String(repeating: "☆", count: max(0, 5 - s.score)))
                         .foregroundStyle(.orange)
                 }
+                Menu {
+                    Button("编辑") { editingSummary = s }
+                    Button("删除", role: .destructive) { deleteSummary(s) }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .foregroundStyle(.secondary)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
             }
             if !s.content.isEmpty {
-                Text(s.content)
+                Self.renderMarkdown(s.content)
                     .font(.callout)
                     .lineLimit(4)
                     .foregroundStyle(.primary)
@@ -266,6 +284,18 @@ struct OfflineView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    /// Renders markdown content for the summary row. Falls back to plain text
+    /// on parse failure so malformed AI output never blocks display.
+    private static func renderMarkdown(_ raw: String) -> Text {
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace
+        )
+        if let attr = try? AttributedString(markdown: raw, options: options) {
+            return Text(attr)
+        }
+        return Text(raw)
     }
 
     /// Formats a DailySummary.date primary key for display.
@@ -370,5 +400,72 @@ struct OfflineView: View {
     private func startTimeString(_ act: OfflineActivity) -> String {
         let date = Date(timeIntervalSince1970: Double(act.startTs) / 1000)
         return Self.timeFormatter.string(from: date)
+    }
+
+    // MARK: - Summary edit/delete actions
+
+    private func saveEditedSummary(_ s: DailySummary) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            try? OfflineStore().saveSummary(s)
+            NotificationCenter.default.post(name: .dailySummaryDidSave, object: nil)
+        }
+    }
+
+    private func deleteSummary(_ s: DailySummary) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            try? OfflineStore().deleteSummary(date: s.date)
+            NotificationCenter.default.post(name: .dailySummaryDidSave, object: nil)
+        }
+    }
+}
+
+// MARK: - Summary Editor Sheet
+
+private struct SummaryEditorSheet: View {
+    @State var summary: DailySummary
+    let onSave: (DailySummary) -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("编辑摘要 · \(summary.date)")
+                .font(.headline)
+
+            Text("内容 (支持 Markdown)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            TextEditor(text: $summary.content)
+                .font(.body)
+                .frame(minHeight: 200)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.secondary.opacity(0.3))
+                )
+
+            HStack {
+                Stepper("评分: \(summary.score) / 5",
+                        value: $summary.score, in: 0...5)
+                Spacer()
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("关键词（逗号分隔）")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("", text: $summary.keywords)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            HStack {
+                Spacer()
+                Button("取消") { onCancel() }
+                Button("保存") { onSave(summary) }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 500, minHeight: 380)
     }
 }
