@@ -475,15 +475,50 @@ struct StatsView: View {
             if case .session(let s) = $0 { return s }
             return nil
         }
+        
+        var totalRecorded: Double = 0
         for s in sessions {
             let catId = s.categoryId ?? "none"
-            dict[catId, default: 0] += Double(s.durationSecs)
+            let duration = Double(s.durationSecs)
+            dict[catId, default: 0] += duration
+            totalRecorded += duration
         }
         
-        return dict.map { (id, secs) in
+        var result = dict.map { (id, secs) -> TagStat in
             let cat = SessionCategory.find(id)
             return TagStat(id: id, name: cat.name, color: cat.color, totalSecs: secs)
         }.sorted { $0.totalSecs > $1.totalSecs }
+        
+        // Add "Unrecorded" slice for visual context
+        let capacity = periodCapacityInSeconds()
+        if totalRecorded < capacity {
+            result.append(TagStat(
+                id: "unrecorded",
+                name: "未记录",
+                color: Color.secondary.opacity(0.15),
+                totalSecs: capacity - totalRecorded
+            ))
+        }
+        
+        return result
+    }
+
+    private func periodCapacityInSeconds() -> Double {
+        switch period {
+        case .today:
+            return 86400 // Fixed 24h as requested
+        case .week:
+            return 7 * 86400
+        case .month:
+            return 30 * 86400
+        case .year:
+            return 365 * 86400
+        case .custom:
+            let (startMs, endMs) = periodRange()
+            let diffSecs = Double(endMs - startMs) / 1000
+            let days = max(1.0, ceil(diffSecs / 86400))
+            return days * 86400
+        }
     }
 
     struct TagStat: Identifiable {
