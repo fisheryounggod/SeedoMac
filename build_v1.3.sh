@@ -2,7 +2,7 @@
 set -e
 
 APP_NAME="SeedoMac"
-VERSION="1.5.1"
+VERSION="1.5.2"
 DMG_NAME="SeedoMac_v${VERSION}.dmg"
 BUILD_DIR="build"
 EXPORT_DIR="${BUILD_DIR}/Export"

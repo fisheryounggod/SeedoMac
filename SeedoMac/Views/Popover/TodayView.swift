@@ -16,7 +16,6 @@ struct TodayView: View {
             
             VStack(spacing: 0) {
                 breakProgressSection
-                sessionCounterSection
             }
             .background(Color.primary.opacity(0.03))
             
@@ -97,32 +96,6 @@ struct TodayView: View {
         .padding(.bottom, 8)
     }
 
-    private var sessionCounterSection: some View {
-        HStack(spacing: 12) {
-            let current = breakScheduler.sessionsSinceLongBreak
-            let total = 4 // Default freq
-            
-            HStack(spacing: 4) {
-                ForEach(0..<total, id: \.self) { idx in
-                    Capsule()
-                        .fill(idx < current ? Color.green : Color.primary.opacity(0.1))
-                        .frame(width: 20, height: 6)
-                }
-            }
-            
-            Spacer()
-            
-            Text("\(current)/\(total) 轮")
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 2)
-                .background(Color.green.opacity(0.1))
-                .foregroundStyle(.green)
-                .cornerRadius(4)
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 16)
-    }
 
     // MARK: - Current Activity
 
