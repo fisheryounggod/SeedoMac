@@ -95,6 +95,7 @@ struct StatsView: View {
     @State private var monthlyPlan: String = ""
     @State private var yearlyPlan: String = ""
     @State private var editingScope: PlanScope? = nil
+    @State private var isEditingPlans: Bool = false
     @State private var planStatus: String? = nil
 
     var body: some View {
@@ -122,6 +123,20 @@ struct StatsView: View {
                 historySection
             }
             .padding(25)
+        }
+        .sheet(isPresented: $isEditingPlans) {
+            PlanBoardEditorSheet(
+                dailyPlan: $dailyPlan,
+                monthlyPlan: $monthlyPlan,
+                yearlyPlan: $yearlyPlan,
+                onSave: { d, m, y in
+                    savePlan(scope: .daily, content: d, silent: false)
+                    savePlan(scope: .monthly, content: m, silent: false)
+                    savePlan(scope: .yearly, content: y, silent: false)
+                    isEditingPlans = false
+                },
+                onCancel: { isEditingPlans = false }
+            )
         }
         .sheet(item: $editingSession) { session in
             WorkSessionEditorSheet(
@@ -223,7 +238,7 @@ struct StatsView: View {
             Text(content?.isEmpty == false ? content!.replacingOccurrences(of: "\n", with: " ") : "未设定")
                 .font(.system(size: 13, weight: .regular, design: .rounded))
                 .lineLimit(1)
-                .foregroundStyle(content?.isEmpty == false ? .primary : .secondary.opacity(0.6))
+                .foregroundStyle(content?.isEmpty == false ? Color.primary : Color.secondary.opacity(0.6))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -430,7 +445,6 @@ struct StatsView: View {
                     .transition(.opacity)
                 }
             }
-        }
         }
         .padding(16)
         .background(Color.secondary.opacity(0.04))
@@ -1058,6 +1072,57 @@ struct StatsView: View {
         case .month: return "Past month"
         case .year: return "Past year"
         case .custom: return "\(Self.dateFormatter.string(from: customStart)) — \(Self.dateFormatter.string(from: customEnd))"
+        }
+    }
+}
+
+// MARK: - Plan Board Editor Sheet
+struct PlanBoardEditorSheet: View {
+    @Binding var dailyPlan: String
+    @Binding var monthlyPlan: String
+    @Binding var yearlyPlan: String
+    
+    @State private var localDaily: String = ""
+    @State private var localMonthly: String = ""
+    @State private var localYearly: String = ""
+    
+    var onSave: (String, String, String) -> Void
+    var onCancel: () -> Void
+    
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("日度目标") {
+                    TextEditor(text: $localDaily)
+                        .frame(height: 100)
+                }
+                Section("阶段计划 (月度)") {
+                    TextEditor(text: $localMonthly)
+                        .frame(height: 100)
+                }
+                Section("长期愿景 (年度)") {
+                    TextEditor(text: $localYearly)
+                        .frame(height: 100)
+                }
+            }
+            .navigationTitle("编辑计划 & 目标")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消", action: onCancel)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        onSave(localDaily, localMonthly, localYearly)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+        }
+        .frame(width: 500, height: 600)
+        .onAppear {
+            localDaily = dailyPlan
+            localMonthly = monthlyPlan
+            localYearly = yearlyPlan
         }
     }
 }
