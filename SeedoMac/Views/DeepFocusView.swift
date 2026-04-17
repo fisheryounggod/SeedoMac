@@ -14,8 +14,6 @@ struct DeepFocusView: View {
     @State private var timeElapsed: Int = 0
     @State private var timer: Timer?
     @State private var player: AVAudioPlayer?
-    @ObservedObject var mixer = SoundMixer.shared
-    @State private var showingMixer = false
     
     // Session Tracking
     @State private var sessionStartTs: Int64? = nil
@@ -25,15 +23,9 @@ struct DeepFocusView: View {
     @State private var sessionSummary: String = ""
     @State private var isSaving = false
     
-    // Custom Sounds
-    @State private var customSoundsPath: String = ""
-    @State private var customSounds: [String] = []
-    
     // UI Logic
     @State private var showingExitConfirmation = false
-    @State private var showingNotes = true
     
-    private let availableSounds = ["None", "Rain", "Waves", "White Noise", "Custom (Local)"]
     private let defaultCountdownSecs = 25 * 60
     
     var body: some View {
@@ -112,96 +104,20 @@ struct DeepFocusView: View {
                 Spacer()
                 
                 if !showingLogOverlay {
-                    // Bottom Controls (Sound Mixer)
-                    HStack(spacing: 30) {
-                        Button {
-                            withAnimation { showingMixer.toggle() }
-                        } label: {
-                            Label("环境混音", systemImage: "slider.horizontal.3")
-                                .padding(8)
-                                .background(Color.white.opacity(0.1))
-                                .cornerRadius(8)
+                    if mode == .stopwatch && timer != nil {
+                        Button("停止并记录") {
+                            handleSessionFinished()
                         }
-                        .buttonStyle(.plain)
-                        
-                        if showingMixer {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 20) {
-                                    ForEach(mixer.tracks) { track in
-                                        VStack(spacing: 4) {
-                                            Text(track.name).font(.system(size: 8))
-                                            Slider(value: Binding(
-                                                get: { track.volume },
-                                                set: { mixer.updateVolume(id: track.id, volume: $0) }
-                                            ), in: 0...1)
-                                            .frame(width: 60)
-                                            .controlSize(.small)
-                                        }
-                                    }
-                                }
-                                .padding(.horizontal)
-                            }
-                            .frame(maxWidth: 400)
-                            .transition(.opacity.combined(with: .scale))
-                        }
-                        
-                        Button("选择目录") {
-                            chooseCustomSoundsFolder()
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        
-                        if mode == .stopwatch && timer != nil {
-                            Button("停止并记录") {
-                                handleSessionFinished()
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.red)
-                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                        .padding(.bottom, 60)
                     }
-                    .padding(.bottom, 60)
                 }
             }
             .padding()
             .blur(radius: showingLogOverlay ? 10 : 0)
             
-            // Side Note Editor (Anytime recording)
-            if !showingLogOverlay {
-                HStack {
-                    Spacer()
-                    VStack(alignment: .trailing) {
-                        Button {
-                            withAnimation { showingNotes.toggle() }
-                        } label: {
-                            Label(showingNotes ? "隐藏随笔" : "随时记录", systemImage: "note.text")
-                                .font(.caption.bold())
-                                .padding(8)
-                                .background(Color.white.opacity(0.1))
-                                .cornerRadius(8)
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.top, 80)
-                        
-                        if showingNotes {
-                            VStack(alignment: .leading) {
-                                Text("随笔记录").font(.caption2.bold()).foregroundStyle(.blue)
-                                TextEditor(text: $sessionSummary)
-                                    .font(.system(.body, design: .rounded))
-                                    .scrollContentBackground(.hidden)
-                                    .padding(8)
-                                    .background(Color.white.opacity(0.05))
-                                    .cornerRadius(12)
-                            }
-                            .frame(width: 300, height: 400)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
-                            .allowsHitTesting(true)
-                        }
-                        Spacer()
-                    }
-                    .padding(.trailing, 40)
-                    .zIndex(10)
-                }
-            }
+            // Note: Side Note Editor removed per user request
             
             // Logging Overlay
             if showingLogOverlay {
@@ -273,7 +189,6 @@ struct DeepFocusView: View {
         }
         .onDisappear {
             stopTimer()
-            mixer.stopAll()
             player?.stop()
         }
     }
@@ -350,34 +265,5 @@ struct DeepFocusView: View {
         let m = secs / 60
         let s = secs % 60
         return String(format: "%02d:%02d", m, s)
-    }
-    
-    private func updateSound() {
-        // Legacy single sound behavior replaced by mixer
-    }
-    
-    private func chooseCustomSoundsFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        
-        if panel.runModal() == .OK {
-            if let url = panel.url {
-                self.customSoundsPath = url.path
-                mixer.setCustomPath(url.path)
-                loadCustomSounds()
-            }
-        }
-    }
-    
-    private func loadCustomSounds() {
-        let fm = FileManager.default
-        do {
-            let files = try fm.contentsOfDirectory(atPath: customSoundsPath)
-            self.customSounds = files.filter { $0.lowercased().hasSuffix(".mp3") }
-        } catch {
-            print("Failed to load custom sounds: \(error)")
-        }
     }
 }

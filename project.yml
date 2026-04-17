@@ -2,7 +2,7 @@ name: SeedoMac
 options:
   bundleIdPrefix: tech.seedo
   deploymentTarget:
-    macOS: "13.0"
+    macOS: "14.0"
   xcodeVersion: "15"
   createIntermediateGroups: true
 packages:
@@ -24,7 +24,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: tech.seedo.mac
         SWIFT_VERSION: "5.10"
-        MACOSX_DEPLOYMENT_TARGET: "13.0"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
         CODE_SIGN_STYLE: Automatic
         INFOPLIST_FILE: SeedoMac/Info.plist
     dependencies:
@@ -42,7 +42,7 @@ targets:
       - target: SeedoMac
     settings:
       base:
-        MACOSX_DEPLOYMENT_TARGET: "13.0"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
         SWIFT_VERSION: "5.10"
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGN_STYLE: Automatic

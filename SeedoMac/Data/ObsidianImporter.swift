@@ -161,6 +161,42 @@ final class ObsidianImporter {
         return inserted
     }
 
+    /// Appends the AI summary to the end of today's Obsidian daily note.
+    /// Format: `- HH:mm #work CONTENT`
+    func appendSummary(_ content: String) throws {
+        guard let vault = AppDatabase.shared.setting(for: "obsidian_vault_path"),
+              !vault.isEmpty else {
+            return
+        }
+
+        let today = Date()
+        let df = DateFormatter()
+        df.dateFormat = "yyyyMMdd"
+        df.locale = Locale(identifier: "en_US_POSIX")
+        let filename = df.string(from: today) + ".md"
+
+        let fileURL = URL(fileURLWithPath: vault)
+            .appendingPathComponent("sources/diarys/\(filename)")
+
+        let tf = DateFormatter()
+        tf.dateFormat = "HH:mm"
+        let timeStr = tf.string(from: Date())
+        
+        let cleanContent = content.replacingOccurrences(of: "\n", with: " ")
+        let line = "\n- \(timeStr) #work \(cleanContent)"
+
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            try line.write(to: fileURL, atomically: true, encoding: .utf8)
+        } else {
+            let handle = try FileHandle(forWritingTo: fileURL)
+            handle.seekToEndOfFile()
+            if let data = (line).data(using: .utf8) {
+                handle.write(data)
+            }
+            handle.closeFile()
+        }
+    }
+
     private func existsObsidianActivity(startTs: Int64) throws -> Bool {
         try AppDatabase.shared.pool.read { d in
             let count = try WorkSession

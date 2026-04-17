@@ -4,12 +4,12 @@ import Foundation
 private let systemPrompt = """
 你是一位极致效率教练。根据用户提供的电脑使用数据、专注会话记录、离线活动日志以及设定的目标计划，生成一份专业的工作复盘（300字以内）。
 
-包含：
+重点分析：
 1. **现状亮点**：基于数字和离线日志的专注成果。
-2. **目标校准 (Goal Calibration)**：对比设定的日/月/年计划，分析当前的进度偏差或达成情况。必须引用计划内容。
-3. **优化建议**：基于当前时间分配问题，给出具体的、可操作的改进策略。
-4. **评分与关键词**：
-最后给出该时段的专注评分（1-5分）和3个关键词，格式（必须在回复最后）：
+2. **目标校准 (Target Calibration)**：对比设定的日/月/年计划，量化分析当前的进度偏差或达成情况。必须引用计划内容并指出计划与实际的 Gap（差距）。
+3. **优化建议**：基于当前时间分配问题，输出下一步的具体改进策略。
+
+最后给出 1-5 分的评分和 3 个关键词，格式必须严格如下（位于回复最后）：
 SCORE: X
 KEYWORDS: 关键词1, 关键词2, 关键词3
 """
@@ -108,10 +108,12 @@ final class AIService {
                 let start = Date(timeIntervalSince1970: Double(ws.startTs) / 1000)
                 let timeStr = AIService.timeFormatter.string(from: start)
                 let typePrefix = ws.isManual ? "[手动]" : "[自动]"
-                let label = ws.isManual ? (ws.title.isEmpty ? "未记录" : ws.title) : "专注会话"
+                // v1.3.9+: ws.summary is title, ws.title is note
+                let label = ws.summary.isEmpty ? (ws.title.isEmpty ? "未记录活动" : ws.title) : ws.summary
                 lines.append("- \(typePrefix) \(timeStr) | \(Int(ws.durationSecs/60))m | \(label)")
-                if !ws.summary.isEmpty {
-                    lines.append("  备注：\(ws.summary)")
+                
+                if !ws.summary.isEmpty && !ws.title.isEmpty {
+                    lines.append("  背景/备注：\(ws.title)")
                 }
             }
         }

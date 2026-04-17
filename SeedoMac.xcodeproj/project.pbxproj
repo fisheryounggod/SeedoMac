@@ -14,7 +14,6 @@
 		1D0CFA0AFBBD34E955A29493 /* SummaryContextBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3772C6DD6A94788916E49E7 /* SummaryContextBuilder.swift */; };
 		21683D113C652EFB5A9DB4BE /* CalendarSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04AF2ED02515E9E6552166E8 /* CalendarSyncService.swift */; };
 		22018153D1F325645E5CE51F /* AppDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3229C2E6505FCEE14A7CA537 /* AppDatabase.swift */; };
-		31F6CA8E862FD3786A5129B7 /* SoundMixer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1802AC15E58033C255F9312 /* SoundMixer.swift */; };
 		356D8D463DDA09D6DBEF77C0 /* DeepFocusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D9AEC608562B30E1C0654C1 /* DeepFocusView.swift */; };
 		37DAF5699F802EAACEC05F28 /* WorkSessionEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A7B6A655B3C1E727FCC1D9F /* WorkSessionEditorSheet.swift */; };
 		42A4EE5C069825D5E624351A /* HeatmapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC3E9771680DA1FFB01BE6C4 /* HeatmapView.swift */; };
@@ -95,7 +94,6 @@
 		C627E0D14243DE29DF13092F /* SessionBufferTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionBufferTests.swift; sourceTree = "<group>"; };
 		C8A4C13BEF7CFD72C37D94C4 /* BrowserURLProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserURLProvider.swift; sourceTree = "<group>"; };
 		C8E05CFC222A618B0AD92D42 /* EventStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventStoreTests.swift; sourceTree = "<group>"; };
-		E1802AC15E58033C255F9312 /* SoundMixer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundMixer.swift; sourceTree = "<group>"; };
 		E4E12F22BB8829626E36CDF4 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		E534998DC7FCEEF2BCBA1662 /* ObsidianImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObsidianImporter.swift; sourceTree = "<group>"; };
 		EF903CE344E90093D6509195 /* TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
@@ -282,7 +280,6 @@
 			isa = PBXGroup;
 			children = (
 				04AF2ED02515E9E6552166E8 /* CalendarSyncService.swift */,
-				E1802AC15E58033C255F9312 /* SoundMixer.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -423,7 +420,6 @@
 				7830E4870CDD6C4D3A3A6435 /* SessionBuffer.swift in Sources */,
 				FBE7E393BBE5C3F77F5395FB /* SettingsView.swift in Sources */,
 				64B08EB2A1E17106B7A27E56 /* Shortcuts.swift in Sources */,
-				31F6CA8E862FD3786A5129B7 /* SoundMixer.swift in Sources */,
 				0025530114A55284B98CBC4F /* StatsView.swift in Sources */,
 				1D0CFA0AFBBD34E955A29493 /* SummaryContextBuilder.swift in Sources */,
 				039C056172A976E0681481FA /* TodayView.swift in Sources */,
@@ -456,7 +452,7 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_BUNDLE_IDENTIFIER = tech.seedo.SeedoMacTests;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.10;
@@ -475,7 +471,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_BUNDLE_IDENTIFIER = tech.seedo.mac;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.10;
@@ -533,7 +529,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -590,7 +586,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -613,7 +609,7 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_BUNDLE_IDENTIFIER = tech.seedo.SeedoMacTests;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.10;
@@ -632,7 +628,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				PRODUCT_BUNDLE_IDENTIFIER = tech.seedo.mac;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.10;

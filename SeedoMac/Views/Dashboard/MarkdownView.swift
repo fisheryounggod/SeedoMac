@@ -87,7 +87,7 @@ struct MarkdownView: View {
         
         // 2. Initial MD parse
         var options = AttributedString.MarkdownParsingOptions()
-        options.interpretedSyntax = .inlineOnlyPreservingWhitespace // Back to safe one or use full name if I can find it
+        options.interpretedSyntax = .full // Allows headers, lists, etc.
         var attrStr = (try? AttributedString(markdown: str, options: options)) ?? AttributedString(str)
         
         // 3. Handle ==highlight==

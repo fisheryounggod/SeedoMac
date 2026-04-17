@@ -60,27 +60,34 @@ struct StatsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 25) {
+            VStack(alignment: .leading, spacing: 30) {
                 heatmapSection
                 
-                VStack(alignment: .leading, spacing: 15) {
+                VStack(alignment: .leading, spacing: 20) {
                     periodSelector
                     if period == .custom { customRangePicker }
                     
+                    // Main Stats Row
                     HStack(alignment: .top, spacing: 20) {
                         topAppsSection
+                            .frame(maxWidth: .infinity)
                         
-                        VStack(alignment: .leading, spacing: 20) {
-                            aiSummaryFocalSection
-                            compactPlanSection
-                        }
-                        .frame(width: 260)
+                        tagStatsSection
+                            .frame(width: 300)
                     }
+                    
+                    // Full-width AI Summary
+                    aiSummaryFocalSection
+                        .frame(maxWidth: .infinity)
+                    
+                    // Full-width Plan
+                    compactPlanSection
+                        .frame(maxWidth: .infinity)
                 }
                 
                 historySection
             }
-            .padding(20)
+            .padding(25)
         }
         .sheet(item: $editingSession) { session in
             WorkSessionEditorSheet(
@@ -159,7 +166,7 @@ struct StatsView: View {
     // MARK: - Sections
 
     private var compactPlanSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("\(planScope.rawValue)计划")
                     .font(.headline)
@@ -181,7 +188,7 @@ struct StatsView: View {
             
             ZStack(alignment: .topLeading) {
                 if planContent.isEmpty {
-                    Text("写下计画...")
+                    Text("记录今天的计划...")
                         .font(.caption)
                         .foregroundStyle(.secondary.opacity(0.5))
                         .padding(.top, 8)
@@ -191,14 +198,14 @@ struct StatsView: View {
                 TextEditor(text: $planContent)
                     .font(.system(.body, design: .rounded))
                     .scrollContentBackground(.hidden)
-                    .frame(height: 100)
+                    .frame(height: 120)
                     .padding(4)
             }
-            .background(Color.secondary.opacity(0.04))
-            .cornerRadius(8)
+            .background(Color.primary.opacity(0.03))
+            .cornerRadius(10)
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.blue.opacity(0.1), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.primary.opacity(0.05), lineWidth: 1)
             )
             
             HStack {
@@ -216,15 +223,15 @@ struct StatsView: View {
                 .buttonStyle(.plain)
                 .font(.caption.bold())
                 .foregroundStyle(.blue)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
                 .background(Color.blue.opacity(0.1))
-                .cornerRadius(4)
+                .cornerRadius(6)
             }
         }
-        .padding(12)
+        .padding(16)
         .background(Color.secondary.opacity(0.03))
-        .cornerRadius(12)
+        .cornerRadius(16)
     }
 
     private var heatmapSection: some View {
@@ -281,53 +288,131 @@ struct StatsView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity)
+    }
+
+    private var tagStatsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("标签分布", systemImage: "chart.pie.fill")
+                .font(.headline)
+            
+            let stats = tagStats()
+            if stats.isEmpty {
+                Text("暂无专注记录")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 40)
+            } else {
+                Chart(stats) { item in
+                    SectorMark(
+                        angle: .value("Time", item.totalSecs),
+                        innerRadius: .ratio(0.6),
+                        angularInset: 1.5
+                    )
+                    .foregroundStyle(item.color)
+                    .cornerRadius(4)
+                }
+                .frame(height: 180)
+                .padding(.vertical, 8)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(stats.prefix(4)) { item in
+                        HStack {
+                            Circle().fill(item.color).frame(width: 8, height: 8)
+                            Text(item.name).font(.caption2)
+                            Spacer()
+                            Text(formatDuration(item.totalSecs))
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(Color.secondary.opacity(0.04))
+        .cornerRadius(16)
+    }
+
+    private func tagStats() -> [TagStat] {
+        var dict: [String: Double] = [:]
+        for s in sessions {
+            let catId = s.categoryId ?? "none"
+            dict[catId, default: 0] += Double(s.durationSecs)
+        }
+        
+        return dict.map { (id, secs) in
+            let cat = SessionCategory.find(id)
+            return TagStat(id: id, name: cat.name, color: cat.color, totalSecs: secs)
+        }.sorted { $0.totalSecs > $1.totalSecs }
+    }
+
+    struct TagStat: Identifiable {
+        let id: String
+        let name: String
+        let color: Color
+        let totalSecs: Double
     }
 
     private var aiSummaryFocalSection: some View {
-        GroupBox(label: Label("AI 深度复盘", systemImage: "sparkles")) {
-            VStack(alignment: .leading, spacing: 10) {
-                if let s = summary, !s.content.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        MarkdownView(text: s.content, lineLimit: 5)
-                            .font(.caption)
-                        
-                        HStack {
-                            HStack(spacing: 2) {
-                                ForEach(0..<5) { idx in
-                                    Image(systemName: "star.fill")
-                                        .font(.system(size: 8))
-                                        .foregroundStyle(idx < s.score ? .orange : .secondary.opacity(0.3))
-                                }
-                            }
-                            Spacer()
-                            Button("查看完整") { /* TODO: Show full dialog */ }
-                                .buttonStyle(.plain)
-                                .font(.caption2)
-                                .foregroundStyle(Color.accentColor)
-                        }
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("AI 深度复盘", systemImage: "sparkles")
+                    .font(.headline)
+                Spacer()
+                if isLoadingAI {
+                    ProgressView().controlSize(.small)
+                }
+            }
+            
+            if let s = summary, !s.content.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    ScrollView {
+                        MarkdownView(text: s.content)
+                            .lineSpacing(4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                } else {
+                    .frame(minHeight: 150, maxHeight: 400)
+                    
+                    HStack {
+                        HStack(spacing: 2) {
+                            ForEach(0..<5) { idx in
+                                Image(systemName: "star.fill")
+                                    .font(.system(size: 8))
+                                    .foregroundStyle(idx < s.score ? .orange : .secondary.opacity(0.3))
+                            }
+                        }
+                        Spacer()
+                        Text(s.keywords)
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 4)
+                }
+            } else {
+                VStack(spacing: 8) {
                     Text("生成当前阶段的 AI 总结以获得深度洞察。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
+                    Text("包含自动统计、手动记录与计划达成校准。")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.secondary.opacity(0.8))
                 }
-
-                Button(action: generateAISummary) {
-                    if isLoadingAI {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Label("立即生成", systemImage: "wand.and.stars")
-                    }
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .frame(maxWidth: .infinity)
-                .disabled(isLoadingAI)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 20)
             }
+            
+            Button(action: generateAISummary) {
+                HStack {
+                    Image(systemName: "wand.and.stars")
+                    Text(summary == nil ? "立即生成" : "重新复盘")
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.plain)
+            .font(.caption.bold())
+            .foregroundStyle(.blue)
+            .padding(.horizontal, 10)
             .padding(.vertical, 5)
         }
     }
@@ -650,8 +735,13 @@ struct StatsView: View {
                         self.isLoadingAI = false
                         switch result {
                         case .success(let s):
-                            self.pendingSummary = s
-                            self.showSavePrompt = true
+                            // Persist to DB
+                            try? AIService.shared.persistSummary(s)
+                            self.summary = s
+                            
+                            // NEW: Append to Obsidian diary
+                            try? ObsidianImporter.shared.appendSummary(s.content)
+                            
                         case .failure(let e): self.aiError = e.localizedDescription
                         }
                     }
