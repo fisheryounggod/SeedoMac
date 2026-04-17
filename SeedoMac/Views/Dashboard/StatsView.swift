@@ -362,7 +362,7 @@ struct StatsView: View {
                     .padding(.vertical, 40)
             } else {
                 VStack(spacing: 0) {
-                    ForEach(Array(periodApps.prefix(8).enumerated()), id: \.offset) { index, app in
+                    ForEach(Array(periodApps.prefix(5).enumerated()), id: \.offset) { index, app in
                         HStack {
                             Text(app.appOrDomain)
                                 .lineLimit(1)
@@ -375,7 +375,7 @@ struct StatsView: View {
                         }
                         .padding(.vertical, 8)
                         
-                        if index < min(periodApps.count, 8) - 1 {
+                        if index < min(periodApps.count, 5) - 1 {
                             Divider().opacity(0.5)
                         }
                     }
