@@ -54,7 +54,8 @@ final class ObsidianImporter {
     /// Matching rules:
     /// - Line may have leading whitespace and must start with `-`
     /// - HH:MM must be 1–2 digit hour + 2 digit minute
-    /// - Label is everything after the first run of whitespace, trimmed
+    /// - Label must contain `#log` (case-insensitive) or `#记录`
+    /// - Label is everything after the first run of whitespace, with tags stripped
     func parseEntries(_ content: String, day: Date) -> [ParsedEntry] {
         let pattern = #"^\s*-\s+(\d{1,2}):(\d{2})\s+(.+?)\s*$"#
         guard let regex = try? NSRegularExpression(
@@ -78,13 +79,19 @@ final class ObsidianImporter {
                   let minute = Int(content[mRange]),
                   (0...23).contains(hour),
                   (0...59).contains(minute) else { return }
+
+            let rawLabel = String(content[lRange]).trimmingCharacters(in: .whitespaces)
+            guard Self.hasLogTag(rawLabel) else { return }
+
             dayComps.hour = hour
             dayComps.minute = minute
             dayComps.second = 0
             guard let date = cal.date(from: dayComps) else { return }
-            let label = String(content[lRange]).trimmingCharacters(in: .whitespaces)
-            guard !label.isEmpty else { return }
-            raw.append((Int64(date.timeIntervalSince1970 * 1000), label))
+
+            let cleanLabel = Self.stripLogTag(rawLabel)
+            guard !cleanLabel.isEmpty else { return }
+
+            raw.append((Int64(date.timeIntervalSince1970 * 1000), cleanLabel))
         }
 
         // Sort by timestamp, compute duration = next.startTs - current.startTs
@@ -105,35 +112,59 @@ final class ObsidianImporter {
         return out
     }
 
+    private static func hasLogTag(_ label: String) -> Bool {
+        let pattern = #"(?i)#log\b|#记录"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return false
+        }
+        let range = NSRange(label.startIndex..., in: label)
+        return regex.firstMatch(in: label, range: range) != nil
+    }
+
+    private static func stripLogTag(_ label: String) -> String {
+        var s = label
+        if let regex = try? NSRegularExpression(pattern: #"(?i)#log\b"#, options: []) {
+            let range = NSRange(s.startIndex..., in: s)
+            s = regex.stringByReplacingMatches(in: s, range: range, withTemplate: "")
+        }
+        s = s.replacingOccurrences(of: "#记录", with: "")
+        // Collapse whitespace
+        let collapsed = s.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
+        return collapsed.trimmingCharacters(in: .whitespaces)
+    }
+
     // MARK: - Upsert
 
-    /// Inserts entries into `offline_activities`, skipping any row that already
-    /// exists with the same `(start_ts, label)` pair. Returns count of NEW
-    /// inserts.
+    /// Inserts entries into `work_sessions`, skipping any row that already
+    /// exists with the same `(start_ts, is_manual=true)`. Returns count of NEW inserts.
     private func upsertActivities(_ entries: [ParsedEntry]) throws -> Int {
-        let store = OfflineStore()
+        let store = WorkSessionStore()
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         var inserted = 0
         for entry in entries {
-            if try existsActivity(startTs: entry.startTs, label: entry.label) {
+            if try existsObsidianActivity(startTs: entry.startTs) {
                 continue
             }
-            var act = OfflineActivity(
+            var session = WorkSession(
                 startTs: entry.startTs,
-                durationSecs: entry.durationSecs,
-                label: entry.label,
-                createdAt: nowMs
+                endTs: entry.startTs + entry.durationSecs * 1000,
+                topAppsJson: "[]",
+                summary: "",
+                outcome: "completed",
+                createdAt: nowMs,
+                isManual: true,
+                title: entry.label
             )
-            try store.insert(&act)
+            try store.insert(&session)
             inserted += 1
         }
         return inserted
     }
 
-    private func existsActivity(startTs: Int64, label: String) throws -> Bool {
+    private func existsObsidianActivity(startTs: Int64) throws -> Bool {
         try AppDatabase.shared.pool.read { d in
-            let count = try OfflineActivity
-                .filter(Column("start_ts") == startTs && Column("label") == label)
+            let count = try WorkSession
+                .filter(Column("start_ts") == startTs && Column("is_manual") == true)
                 .fetchCount(d)
             return count > 0
         }

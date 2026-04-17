@@ -9,6 +9,9 @@ packages:
   GRDB:
     url: https://github.com/groue/GRDB.swift
     from: "6.0.0"
+  KeyboardShortcuts:
+    url: https://github.com/sindresorhus/KeyboardShortcuts
+    from: "2.0.0"
 targets:
   SeedoMac:
     type: application
@@ -27,6 +30,9 @@ targets:
     dependencies:
       - package: GRDB
         product: GRDB
+      - package: KeyboardShortcuts
+        product: KeyboardShortcuts
+      - sdk: EventKit.framework
   SeedoMacTests:
     type: bundle.unit-test
     platform: macOS

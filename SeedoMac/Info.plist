@@ -17,12 +17,16 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
+	<string>1.3.2</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>6</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>© 2026 Seedo</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Seedo uses your calendar to log focus sessions and productivity highlights.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Seedo uses your calendar to log focus sessions and productivity highlights.</string>
 </dict>
 </plist>

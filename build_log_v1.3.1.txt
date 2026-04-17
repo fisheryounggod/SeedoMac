@@ -1,0 +1,69 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild build -project SeedoMac.xcodeproj -scheme SeedoMac -configuration Release
+
+Resolve Package Graph
+
+
+Resolved source packages:
+  GRDB: https://github.com/groue/GRDB.swift @ 6.29.3
+
+--- xcodebuild: WARNING: Using the first of multiple matching destinations:
+{ platform:macOS, arch:arm64, id:00008112-000169EE11FB401E, name:My Mac }
+{ platform:macOS, arch:x86_64, id:00008112-000169EE11FB401E, name:My Mac }
+{ platform:macOS, name:Any Mac }
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (5 targets)
+    Target 'SeedoMac' in project 'SeedoMac'
+        ➜ Explicit dependency on target 'GRDB' in project 'GRDB'
+    Target 'GRDB' in project 'GRDB'
+        ➜ Explicit dependency on target 'GRDB' in project 'GRDB'
+        ➜ Explicit dependency on target 'GRDB_GRDB' in project 'GRDB'
+    Target 'GRDB' in project 'GRDB'
+        ➜ Explicit dependency on target 'GRDB_GRDB' in project 'GRDB'
+        ➜ Explicit dependency on target 'CSQLite' in project 'GRDB'
+    Target 'CSQLite' in project 'GRDB' (no dependencies)
+    Target 'GRDB_GRDB' in project 'GRDB' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+ReadFileContents /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/share/docc/features.json
+
+Build description signature: 4b3f07aa522a8b8756e9d0cf0f9aca5e
+Build description path: /Users/mac/Library/Developer/Xcode/DerivedData/SeedoMac-beffhyxtthjjlzgnucxnkdiucbph/Build/Intermediates.noindex/XCBuildData/4b3f07aa522a8b8756e9d0cf0f9aca5e.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk /Users/mac/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/macosx26.4-25E236-30f9ca8789b706f8bd3fc906a70d770f.sdkstatcache
+    cd /Users/mac/Github/SeedoMac/SeedoMac.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk -o /Users/mac/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/macosx26.4-25E236-30f9ca8789b706f8bd3fc906a70d770f.sdkstatcache
+
+ProcessInfoPlistFile /Users/mac/Library/Developer/Xcode/DerivedData/SeedoMac-beffhyxtthjjlzgnucxnkdiucbph/Build/Products/Release/GRDB_GRDB.bundle/Contents/Info.plist /Users/mac/Library/Developer/Xcode/DerivedData/SeedoMac-beffhyxtthjjlzgnucxnkdiucbph/Build/Intermediates.noindex/GRDB.build/Release/GRDB_GRDB.build/empty-GRDB_GRDB.plist (in target 'GRDB_GRDB' from project 'GRDB')
+    cd /Users/mac/Library/Developer/Xcode/DerivedData/SeedoMac-beffhyxtthjjlzgnucxnkdiucbph/SourcePackages/checkouts/GRDB.swift
+    builtin-infoPlistUtility /Users/mac/Library/Developer/Xcode/DerivedData/SeedoMac-beffhyxtthjjlzgnucxnkdiucbph/Build/Intermediates.noindex/GRDB.build/Release/GRDB_GRDB.build/empty-GRDB_GRDB.plist -producttype com.apple.product-type.bundle -expandbuildsettings -platform macosx -o /Users/mac/Library/Developer/Xcode/DerivedData/SeedoMac-beffhyxtthjjlzgnucxnkdiucbph/Build/Products/Release/GRDB_GRDB.bundle/Contents/Info.plist
+
+CopySwiftLibs /Users/mac/Library/Developer/Xcode/DerivedData/SeedoMac-beffhyxtthjjlzgnucxnkdiucbph/Build/Products/Release/SeedoMac.app (in target 'SeedoMac' from project 'SeedoMac')
+    cd /Users/mac/Github/SeedoMac
+    builtin-swiftStdLibTool --copy --verbose --sign - --scan-executable /Users/mac/Library/Developer/Xcode/DerivedData/SeedoMac-beffhyxtthjjlzgnucxnkdiucbph/Build/Products/Release/SeedoMac.app/Contents/MacOS/SeedoMac --scan-folder /Users/mac/Library/Developer/Xcode/DerivedData/SeedoMac-beffhyxtthjjlzgnucxnkdiucbph/Build/Products/Release/SeedoMac.app/Contents/Frameworks --scan-folder /Users/mac/Library/Developer/Xcode/DerivedData/SeedoMac-beffhyxtthjjlzgnucxnkdiucbph/Build/Products/Release/SeedoMac.app/Contents/PlugIns --scan-folder /Users/mac/Library/Developer/Xcode/DerivedData/SeedoMac-beffhyxtthjjlzgnucxnkdiucbph/Build/Products/Release/SeedoMac.app/Contents/Library/SystemExtensions --scan-folder /Users/mac/Library/Developer/Xcode/DerivedData/SeedoMac-beffhyxtthjjlzgnucxnkdiucbph/Build/Products/Release/SeedoMac.app/Contents/Extensions --scan-folder /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk/System/Library/Frameworks/EventKit.framework --platform macosx --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /Users/mac/Library/Developer/Xcode/DerivedData/SeedoMac-beffhyxtthjjlzgnucxnkdiucbph/Build/Products/Release/SeedoMac.app/Contents/Frameworks --strip-bitcode --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /Users/mac/Library/Developer/Xcode/DerivedData/SeedoMac-beffhyxtthjjlzgnucxnkdiucbph/Build/Intermediates.noindex/SeedoMac.build/Release/SeedoMac.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os --back-deploy-swift-span
+
+ProcessInfoPlistFile /Users/mac/Library/Developer/Xcode/DerivedData/SeedoMac-beffhyxtthjjlzgnucxnkdiucbph/Build/Products/Release/SeedoMac.app/Contents/Info.plist /Users/mac/Github/SeedoMac/SeedoMac/Info.plist (in target 'SeedoMac' from project 'SeedoMac')
+    cd /Users/mac/Github/SeedoMac
+    builtin-infoPlistUtility /Users/mac/Github/SeedoMac/SeedoMac/Info.plist -producttype com.apple.product-type.application -genpkginfo /Users/mac/Library/Developer/Xcode/DerivedData/SeedoMac-beffhyxtthjjlzgnucxnkdiucbph/Build/Products/Release/SeedoMac.app/Contents/PkgInfo -expandbuildsettings -platform macosx -scanforprivacyfile /Users/mac/Library/Developer/Xcode/DerivedData/SeedoMac-beffhyxtthjjlzgnucxnkdiucbph/Build/Products/Release/SeedoMac.app/Contents/Resources/GRDB_GRDB.bundle -o /Users/mac/Library/Developer/Xcode/DerivedData/SeedoMac-beffhyxtthjjlzgnucxnkdiucbph/Build/Products/Release/SeedoMac.app/Contents/Info.plist
+
+** BUILD SUCCEEDED **
+

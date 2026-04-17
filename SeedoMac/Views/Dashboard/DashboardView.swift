@@ -1,52 +1,10 @@
-// SeedoMac/Views/Dashboard/DashboardView.swift
 import SwiftUI
-
-enum DashboardTab: String, CaseIterable {
-    case stats      = "Stats"
-    case categories = "Categories"
-    case offline    = "Log"
-    case settings   = "Settings"
-
-    var icon: String {
-        switch self {
-        case .stats:      return "chart.bar.fill"
-        case .categories: return "tag.fill"
-        case .offline:    return "text.book.closed.fill"
-        case .settings:   return "gearshape.fill"
-        }
-    }
-
-    /// Localized label shown in the sidebar. `rawValue` remains English for
-    /// logging, analytics, and debug output.
-    var displayName: String {
-        switch self {
-        case .stats:      return "统计"
-        case .categories: return "分类"
-        case .offline:    return "日志"
-        case .settings:   return "设置"
-        }
-    }
-}
 
 struct DashboardView: View {
     @ObservedObject var appState: AppState
-    @State private var selectedTab: DashboardTab = .stats
 
     var body: some View {
-        NavigationSplitView {
-            List(DashboardTab.allCases, id: \.self, selection: $selectedTab) { tab in
-                Label(tab.displayName, systemImage: tab.icon)
-            }
-            .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 160, ideal: 180)
-        } detail: {
-            switch selectedTab {
-            case .stats:      StatsView(appState: appState)
-            case .categories: CategoryView()
-            case .offline:    OfflineView()
-            case .settings:   SettingsView(appState: appState)
-            }
-        }
-        .frame(minWidth: 640, minHeight: 480)
+        StatsView(appState: appState)
+            .frame(minWidth: 640, minHeight: 480)
     }
 }

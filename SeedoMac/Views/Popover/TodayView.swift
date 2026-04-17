@@ -3,6 +3,7 @@ import SwiftUI
 
 struct TodayView: View {
     @ObservedObject var appState: AppState
+    @ObservedObject var breakScheduler = BreakScheduler.shared
     let openDashboard: () -> Void
 
     var body: some View {
@@ -12,13 +13,19 @@ struct TodayView: View {
             }
             header
             Divider()
-            categoryBars
+            
+            VStack(spacing: 0) {
+                breakProgressSection
+                sessionCounterSection
+            }
+            .background(Color.primary.opacity(0.03))
+            
             Divider()
             currentActivity
             Divider()
             footer
         }
-        .frame(width: 320)
+        .frame(width: 300)
         .background(.regularMaterial)
     }
 
@@ -28,166 +35,163 @@ struct TodayView: View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.yellow)
-            Text("Grant Accessibility to track window titles")
-                .font(.caption)
+            Text("请授予辅助功能权限以追踪窗口")
+                .font(.caption2)
             Spacer()
-            Button("Grant") { WindowInfoProvider.requestPermission() }
+            Button("授权") { WindowInfoProvider.requestPermission() }
                 .buttonStyle(.borderless)
-                .font(.caption)
+                .font(.caption2)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.yellow.opacity(0.12))
+        .padding(.vertical, 6)
+        .background(Color.yellow.opacity(0.1))
     }
 
     // MARK: - Header
 
     private var header: some View {
         HStack {
-            Text("🌱 Seedo")
-                .font(.headline)
+            Text("🌱 Seedo").font(.headline)
             Spacer()
-            Text(formatDuration(appState.todayTotalSecs))
-                .font(.headline)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
-
-    // MARK: - Category Bars
-
-    private var categoryBars: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if appState.todayCategoryStats.isEmpty {
-                Text("No activity yet today")
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(formatDuration(appState.todayTotalSecs))
+                    .font(.title3)
+                    .fontWeight(.bold)
+                Text("今日专注时长")
+                    .font(.system(size: 8))
                     .foregroundStyle(.secondary)
-                    .font(.caption)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-            } else {
-                ForEach(appState.todayCategoryStats.prefix(5)) { cat in
-                    CategoryBarRow(stat: cat, total: appState.todayTotalSecs)
-                }
             }
         }
-        .padding(.vertical, 8)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    // MARK: - Sections
+
+    private var breakProgressSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("专注进度", systemImage: "timer")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                let remainingMins = max(0, Int(breakScheduler.workIntervalSecs - breakScheduler.workElapsedSecsDetailed) / 60)
+                Text("还需 \(remainingMins) 分钟休息")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            
+            let progress = min(1.0, breakScheduler.workElapsedSecsDetailed / max(1.0, breakScheduler.workIntervalSecs))
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.primary.opacity(0.05))
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(LinearGradient(colors: [.green.opacity(0.8), .green], startPoint: .leading, endPoint: .trailing))
+                        .frame(width: geo.size.width * progress)
+                }
+            }
+            .frame(height: 10)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
+    }
+
+    private var sessionCounterSection: some View {
+        HStack(spacing: 12) {
+            let current = breakScheduler.sessionsSinceLongBreak
+            let total = 4 // Default freq
+            
+            HStack(spacing: 4) {
+                ForEach(0..<total, id: \.self) { idx in
+                    Capsule()
+                        .fill(idx < current ? Color.green : Color.primary.opacity(0.1))
+                        .frame(width: 20, height: 6)
+                }
+            }
+            
+            Spacer()
+            
+            Text("\(current)/\(total) 轮")
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(Color.green.opacity(0.1))
+                .foregroundStyle(.green)
+                .cornerRadius(4)
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 16)
     }
 
     // MARK: - Current Activity
 
     private var currentActivity: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(appState.isTracking ? Color.green : Color.gray)
-                .frame(width: 8, height: 8)
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(appState.isTracking ? Color.green.opacity(0.15) : Color.gray.opacity(0.1))
+                    .frame(width: 28, height: 28)
+                Image(systemName: appState.isTracking ? "waveform.path.ecg" : "pause.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(appState.isTracking ? .green : .gray)
+            }
+
             if appState.isTracking && !appState.currentApp.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(appState.currentApp)
-                        .font(.caption)
-                        .fontWeight(.medium)
+                        .font(.system(size: 11, weight: .semibold))
                         .lineLimit(1)
-                    if !appState.currentTitle.isEmpty {
-                        Text(appState.currentTitle)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    if !appState.currentURL.isEmpty,
-                       let domain = BrowserURLProvider.domain(from: appState.currentURL) {
-                        Text(domain)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
+                    Text(appState.currentTitle)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
                 Spacer()
                 Text(formatDuration(appState.currentDurationSecs))
-                    .font(.caption2)
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary)
             } else {
-                Text(appState.isTracking ? "Waiting for activity…" : "Tracking paused")
-                    .font(.caption)
+                Text(appState.isTracking ? "正在等待活动..." : "已暂停追踪")
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                 Spacer()
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.vertical, 14)
     }
 
     // MARK: - Footer
 
     private var footer: some View {
-        HStack {
-            Button(appState.isTracking ? "⏸ Pause" : "▶ Resume") {
-                appState.isTracking.toggle()
+        HStack(spacing: 12) {
+            Button(action: { appState.isTracking.toggle() }) {
+                Image(systemName: appState.isTracking ? "pause.fill" : "play.fill")
+                    .font(.system(size: 12))
+                    .frame(width: 32, height: 32)
+                    .background(Color.primary.opacity(0.05))
+                    .clipShape(Circle())
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            .buttonStyle(.plain)
 
             Spacer()
 
-            Button("📊 Details") { openDashboard() }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-    }
-
-}
-
-// MARK: - Category Bar Row
-
-struct CategoryBarRow: View {
-    let stat: CategoryStat
-    let total: Double
-
-    private var fraction: Double {
-        guard total > 0 else { return 0 }
-        return min(1.0, stat.totalSecs / total)
-    }
-
-    var body: some View {
-        HStack(spacing: 8) {
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Color(hex: stat.color).opacity(0.2))
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Color(hex: stat.color))
-                        .frame(width: geo.size.width * fraction)
-                }
+            Button(action: { openDashboard() }) {
+                Text("详细统计")
+                    .font(.system(size: 11, weight: .medium))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.accentColor)
+                    .foregroundStyle(.white)
+                    .cornerRadius(100)
             }
-            .frame(height: 8)
-
-            Text(stat.name)
-                .font(.caption)
-                .frame(width: 70, alignment: .leading)
-                .lineLimit(1)
-
-            Text(formatDuration(stat.totalSecs))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 44, alignment: .trailing)
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
-    }
-
-}
-
-// MARK: - Color(hex:) extension (defined once here, used across all views)
-
-extension Color {
-    init(hex: String) {
-        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        var int: UInt64 = 0
-        Scanner(string: hex).scanHexInt64(&int)
-        let r = Double((int >> 16) & 0xFF) / 255
-        let g = Double((int >> 8)  & 0xFF) / 255
-        let b = Double(int         & 0xFF) / 255
-        self.init(red: r, green: g, blue: b)
+        .padding(.vertical, 12)
     }
 }
+
+
 

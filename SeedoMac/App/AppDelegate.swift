@@ -1,25 +1,93 @@
 // SeedoMac/App/AppDelegate.swift
 import AppKit
 import SwiftUI
+import KeyboardShortcuts
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var dashboardWindowController: DashboardWindowController?
+    private var afkReturnPopover: NSPopover?
+    private var deepFocusWindowController: NSWindowController?
     let appState = AppState()
     private var tracker: ActivityTracker!
     private var refreshTimer: Timer?
     private var obsidianImportTimer: Timer?
     private var autoSummaryTimer: Timer?
+    private var breakOverlayController: BreakOverlayWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         loadSettings()
         setupMenuBar()
         startTracker()
+        
+        // Init Break Scheduler
+        _ = BreakScheduler.shared
+        setupBreakObserver()
+        
         scheduleUIRefresh()
         scheduleObsidianAutoImport()
         scheduleAutoDailySummary()
         checkAccessibilityPermission()
+        setupShortcuts()
+    }
+
+    private func setupBreakObserver() {
+        NotificationCenter.default.addObserver(forName: .breakShouldStart, object: nil, queue: .main) { [weak self] note in
+            guard let self = self else { return }
+            guard let startTs = note.userInfo?["startTs"] as? Int64,
+                  let endTs = note.userInfo?["endTs"] as? Int64,
+                  let durationSecs = note.userInfo?["durationSecs"] as? Double,
+                  let canPostpone = note.userInfo?["canPostpone"] as? Bool,
+                  let isLong = note.userInfo?["isLongBreak"] as? Bool,
+                  let durMins = note.userInfo?["durationMins"] as? Int,
+                  let idx = note.userInfo?["sessionIndex"] as? Int,
+                  let total = note.userInfo?["totalSessions"] as? Int else { return }
+            
+            self.showBreakOverlay(
+                startTs: startTs, 
+                endTs: endTs, 
+                durationSecs: durationSecs, 
+                canPostpone: canPostpone,
+                isLongBreak: isLong,
+                durationMins: durMins,
+                sessionIndex: idx,
+                totalSessions: total
+            )
+        }
+
+        NotificationCenter.default.addObserver(forName: .afkReturnDetected, object: nil, queue: .main) { [weak self] note in
+            if let start = note.userInfo?["startTs"] as? Int64,
+               let end = note.userInfo?["endTs"] as? Int64 {
+                self?.showAFKReturnPopup(start: start, end: end)
+            }
+        }
+    }
+    
+    private func showBreakOverlay(
+        startTs: Int64, 
+        endTs: Int64, 
+        durationSecs: Double, 
+        canPostpone: Bool,
+        isLongBreak: Bool,
+        durationMins: Int,
+        sessionIndex: Int,
+        totalSessions: Int
+    ) {
+        // Close existing if any
+        breakOverlayController?.close()
+        
+        breakOverlayController = BreakOverlayWindowController(
+            startTs: startTs, 
+            endTs: endTs, 
+            durationSecs: durationSecs, 
+            canPostpone: canPostpone,
+            isLongBreak: isLongBreak,
+            durationMins: durationMins,
+            sessionIndex: sessionIndex,
+            totalSessions: totalSessions
+        )
+        breakOverlayController?.showWindow(nil)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -38,18 +106,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func setupShortcuts() {
+        KeyboardShortcuts.onKeyDown(for: .togglePureFocus) { [weak self] in
+            self?.enterDeepFocus()
+        }
+        
+        KeyboardShortcuts.onKeyDown(for: .startPauseFocus) { [weak self] in
+            // Toggle today's status
+            let current = (AppDatabase.shared.setting(for: "break_disabled_day") ?? "") != DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none)
+            if current {
+                let todayStr = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none)
+                AppDatabase.shared.saveSetting(key: "break_disabled_day", value: todayStr)
+            } else {
+                AppDatabase.shared.saveSetting(key: "break_disabled_day", value: "")
+            }
+            BreakScheduler.shared.refreshConfig()
+        }
+    }
+
     private func setupMenuBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = "🌱"
-        statusItem.button?.action = #selector(togglePopover)
+        statusItem.button?.action = #selector(handleStatusItemClick)
         statusItem.button?.target = self
+        // Enable both left and right click
+        statusItem.button?.sendAction(on: [.leftMouseDown, .rightMouseDown])
 
         popover = NSPopover()
         popover.contentSize = NSSize(width: 320, height: 300)
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(
             rootView: TodayView(appState: appState, openDashboard: { [weak self] in
-                self?.openDashboard()
+                self?.openDashboard(tab: .stats)
             })
         )
     }
@@ -148,108 +236,45 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         runAutoDailySummary(todayKey: todayStr)
     }
 
-    /// Builds today's app/category/total data using the same pipeline as
-    /// StatsView (with excluded-category filtering), calls AIService, and
-    /// persists the result silently on success.
+    /// Builds today's full context and triggers the AI summary.
     private func runAutoDailySummary(todayKey: String) {
         DispatchQueue.global(qos: .userInitiated).async {
-            let cal = Calendar.current
-            let now = Date()
-            let start = cal.startOfDay(for: now)
-            let startMs = Int64(start.timeIntervalSince1970 * 1000)
-            let endMs = Int64(now.timeIntervalSince1970 * 1000)
+            do {
+                let context = try SummaryContextBuilder().build(for: todayKey)
+                print("[AutoSummary] firing for \(todayKey) — context built")
 
-            let rawApps = (try? EventStore().topApps(
-                startMs: startMs, endMs: endMs, limit: 50
-            )) ?? []
-            let catStore = CategoryStore()
-
-            // Match + filter excluded categories, same semantics as refreshTodayStats
-            var catMap: [String: Category?] = [:]
-            for app in rawApps {
-                catMap[app.appOrDomain] = try? catStore.matchCategory(
-                    for: app.appOrDomain, title: ""
-                )
-            }
-            let includedApps = rawApps.filter { app in
-                if let cat = catMap[app.appOrDomain] ?? nil, cat.includeInStats == false {
-                    return false
-                }
-                return true
-            }
-            let limitedApps = Array(includedApps.prefix(10))
-
-            // Build category totals over the INCLUDED apps only
-            var catTotals: [String: (name: String, color: String, secs: Double)] = [:]
-            for app in includedApps {
-                if let cat = catMap[app.appOrDomain] ?? nil, cat.includeInStats {
-                    var entry = catTotals[cat.id] ?? (cat.name, cat.color, 0.0)
-                    entry.secs += app.totalSecs
-                    catTotals[cat.id] = entry
-                }
-            }
-            let catStats: [CategoryStat] = catTotals
-                .map { CategoryStat(id: $0.key, name: $0.value.name,
-                                    color: $0.value.color, totalSecs: $0.value.secs) }
-                .sorted { $0.totalSecs > $1.totalSecs }
-            let totalSecs = includedApps.reduce(0.0) { $0 + $1.totalSecs }
-
-            print("[AutoSummary] firing for \(todayKey) — \(limitedApps.count) apps, \(catStats.count) cats")
-
-            AIService.shared.generateSummary(
-                periodKey: todayKey,
-                periodLabel: "Today",
-                apps: limitedApps,
-                categories: catStats,
-                totalSecs: totalSecs
-            ) { result in
-                switch result {
-                case .success(let summary):
-                    do {
-                        try AIService.shared.persistSummary(summary)
-                        print("[AutoSummary] saved for \(todayKey)")
-                    } catch {
-                        print("[AutoSummary] persist failed: \(error.localizedDescription)")
+                AIService.shared.generateSummary(context: context, periodLabel: "Today") { result in
+                    switch result {
+                    case .success(let summary):
+                        do {
+                            try AIService.shared.persistSummary(summary)
+                            print("[AutoSummary] saved for \(todayKey)")
+                        } catch {
+                            print("[AutoSummary] persist failed: \(error.localizedDescription)")
+                        }
+                    case .failure(let error):
+                        print("[AutoSummary] generate failed: \(error.localizedDescription)")
+                        // Rollback the last-run marker so the next tick retries
+                        // on failure (e.g., transient API outage).
+                        AppDatabase.shared.saveSetting(key: "auto_summary_last_run_day", value: "")
                     }
-                case .failure(let error):
-                    print("[AutoSummary] generate failed: \(error.localizedDescription)")
-                    // Rollback the last-run marker so the next tick retries
-                    // on failure (e.g., transient API outage).
-                    AppDatabase.shared.saveSetting(key: "auto_summary_last_run_day", value: "")
                 }
+            } catch {
+                print("[AutoSummary] context build failed: \(error.localizedDescription)")
+                AppDatabase.shared.saveSetting(key: "auto_summary_last_run_day", value: "")
             }
         }
     }
 
     private func refreshTodayStats() {
         let store = EventStore()
-        let catStore = CategoryStore()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
-            let rawApps = (try? store.todayStats()) ?? []
-
-            // Filter out apps whose matched category is excluded from stats
-            var includedApps: [AppStat] = []
-            var catTotals: [String: (name: String, color: String, secs: Double)] = [:]
-            for app in rawApps {
-                let matched = try? catStore.matchCategory(for: app.appOrDomain, title: "")
-                if let cat = matched, cat.includeInStats == false { continue }
-                includedApps.append(app)
-                if let cat = matched {
-                    var entry = catTotals[cat.id] ?? (cat.name, cat.color, 0.0)
-                    entry.secs += app.totalSecs
-                    catTotals[cat.id] = entry
-                }
-            }
+            let includedApps = (try? store.todayStats()) ?? []
             let total = includedApps.reduce(0.0) { $0 + $1.totalSecs }
-            let catStats = catTotals
-                .map { CategoryStat(id: $0.key, name: $0.value.name,
-                                    color: $0.value.color, totalSecs: $0.value.secs) }
-                .sorted { $0.totalSecs > $1.totalSecs }
 
             DispatchQueue.main.async {
                 self.appState.todayTotalSecs = total
-                self.appState.todayCategoryStats = catStats
                 self.appState.todayTopApps = Array(includedApps.prefix(10))
 
                 // Update menu bar title
@@ -271,7 +296,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Actions
 
-    @objc private func togglePopover() {
+    @objc private func handleStatusItemClick(_ sender: Any?) {
+        let event = NSApp.currentEvent
+        if event?.type == .rightMouseDown {
+            showContextMenu()
+        } else {
+            togglePopover()
+        }
+    }
+
+    private func togglePopover() {
         guard let button = statusItem.button else { return }
         if popover.isShown {
             popover.performClose(nil)
@@ -281,13 +315,110 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func openDashboard() {
+    private func showContextMenu() {
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem(title: "详细统计", action: #selector(openStats), keyEquivalent: "s"))
+        menu.addItem(NSMenuItem(title: "设置", action: #selector(openSettings), keyEquivalent: ";"))
+        menu.addItem(NSMenuItem(title: "手动添加记录", action: #selector(addManualRecord), keyEquivalent: "n"))
+        menu.addItem(NSMenuItem(title: "今日AI总结", action: #selector(todayAISummary), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "纯专注模式", action: #selector(enterDeepFocus), keyEquivalent: "d"))
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: "退出", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil // Reset so next left-click doesn't show menu
+    }
+
+    @objc private func openStats() {
+        openDashboard(tab: .stats)
+    }
+
+    @objc private func openSettings() {
+        openDashboard(tab: .stats)
+        // Ensure settings sheet is triggered. 
+        // We'll broadcast a notification that StatsView listens to.
+        NotificationCenter.default.post(name: .shouldShowSettings, object: nil)
+    }
+
+    @objc private func addManualRecord() {
+        openDashboard(tab: .stats)
+        NotificationCenter.default.post(name: .shouldShowAddActivity, object: nil)
+    }
+
+    @objc private func todayAISummary() {
+        openDashboard(tab: .stats)
+        NotificationCenter.default.post(name: .shouldRunAISummary, object: nil)
+    }
+
+    private func openDashboard(tab: DashboardTab) {
         popover.performClose(nil)
+        appState.selectedTab = tab
+        
         if dashboardWindowController == nil {
             dashboardWindowController = DashboardWindowController(appState: appState)
         }
         dashboardWindowController?.showWindow(nil)
         dashboardWindowController?.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func enterDeepFocus() {
+        if deepFocusWindowController == nil {
+            let view = DeepFocusView(onClose: { [weak self] in
+                self?.deepFocusWindowController?.close()
+                self?.deepFocusWindowController = nil
+            })
+            let controller = NSHostingController(rootView: view)
+            let window = NSWindow(contentViewController: controller)
+            window.styleMask = [.borderless, .fullSizeContentView]
+            window.level = .mainMenu + 1 // High level
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            
+            deepFocusWindowController = NSWindowController(window: window)
+        }
+        
+        deepFocusWindowController?.window?.setFrame(NSScreen.main?.frame ?? .zero, display: true)
+        deepFocusWindowController?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func showAFKReturnPopup(start: Int64, end: Int64) {
+        if afkReturnPopover == nil {
+            afkReturnPopover = NSPopover()
+            afkReturnPopover?.behavior = .transient
+        }
+        
+        afkReturnPopover?.contentViewController = NSHostingController(
+            rootView: AFKReturnView(
+                startTs: start,
+                endTs: end,
+                onSave: { [weak self] summary in
+                    self?.saveOfflineActivity(start: start, end: end, summary: summary)
+                    self?.afkReturnPopover?.performClose(nil)
+                },
+                onDismiss: { [weak self] in
+                    self?.afkReturnPopover?.performClose(nil)
+                }
+            )
+        )
+        
+        if let button = statusItem.button {
+            afkReturnPopover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        }
+    }
+
+    private func saveOfflineActivity(start: Int64, end: Int64, summary: String) {
+        var session = WorkSession(
+            startTs: start,
+            endTs: end,
+            topAppsJson: "[]",
+            summary: summary,
+            outcome: "completed",
+            createdAt: Int64(Date().timeIntervalSince1970 * 1000)
+        )
+        try? WorkSessionStore().insert(&session)
+        NotificationCenter.default.post(name: .workSessionDidSave, object: nil)
     }
 }

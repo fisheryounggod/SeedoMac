@@ -31,6 +31,22 @@ final class ActivityTracker {
         _isRedactTitles = appState.isRedactTitles
     }
 
+    private func checkAFK() {
+        let idleSecs = CGEventSource.secondsSinceLastEventType(
+            .combinedSessionState,
+            eventType: CGEventType(rawValue: UInt32.max)!
+        )
+        let newAFK = idleSecs >= _afkThreshold
+        if newAFK != isAFK {
+            isAFK = newAFK
+            NotificationCenter.default.post(
+                name: .afkStateDidChange,
+                object: nil,
+                userInfo: ["isAFK": isAFK]
+            )
+        }
+    }
+
     func start() {
         // Snapshot current settings on the main thread before the timer fires
         syncSettings(from: appState)
@@ -71,16 +87,9 @@ final class ActivityTracker {
     private func tick() {
         guard _isTracking else { return }
 
-        // AFK detection using CoreGraphics idle time
-        let idleSecs = CGEventSource.secondsSinceLastEventType(
-            .combinedSessionState,
-            eventType: CGEventType(rawValue: UInt32.max)!
-        )
-        if idleSecs > _afkThreshold {
-            if !isAFK { isAFK = true }
-            return
-        }
-        isAFK = false
+        // AFK detection (Consolidated into checkAFK)
+        checkAFK()
+        if isAFK { return }
 
         // Frontmost app info
         guard let app = NSWorkspace.shared.frontmostApplication else { return }
@@ -127,4 +136,14 @@ final class ActivityTracker {
             print("[ActivityTracker] Failed to flush \(events.count) events: \(error)")
         }
     }
+}
+
+extension Notification.Name {
+    static let afkStateDidChange = Notification.Name("tech.seedo.afkStateDidChange")
+    static let workSessionDidSave = Notification.Name("tech.seedo.workSessionDidSave")
+    static let breakShouldStart   = Notification.Name("tech.seedo.breakShouldStart")
+    static let afkReturnDetected  = Notification.Name("tech.seedo.afkReturnDetected")
+    static let shouldShowSettings = Notification.Name("tech.seedo.shouldShowSettings")
+    static let shouldShowAddActivity = Notification.Name("tech.seedo.shouldShowAddActivity")
+    static let shouldRunAISummary = Notification.Name("tech.seedo.shouldRunAISummary")
 }

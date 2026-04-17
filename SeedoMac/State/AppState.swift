@@ -12,8 +12,10 @@ final class AppState: ObservableObject {
 
     // Today summary (refreshed every 5s)
     @Published var todayTotalSecs: Double = 0
-    @Published var todayCategoryStats: [CategoryStat] = []
     @Published var todayTopApps: [AppStat] = []
+
+    // UI State
+    @Published var selectedTab: DashboardTab = .stats
 
     // Permissions
     @Published var hasAccessibilityPermission: Bool = false

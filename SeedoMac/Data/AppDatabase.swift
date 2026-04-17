@@ -106,6 +106,39 @@ final class AppDatabase {
             """)
         }
 
+        migrator.registerMigration("v4_unify_storage") { db in
+            // 1. Update work_sessions table
+            try db.execute(sql: "ALTER TABLE work_sessions ADD COLUMN is_manual INTEGER NOT NULL DEFAULT 0")
+            try db.execute(sql: "ALTER TABLE work_sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+
+            // 2. Migrate data from offline_activities
+            try db.execute(sql: """
+                INSERT INTO work_sessions (start_ts, end_ts, top_apps_json, summary, outcome, created_at, is_manual, title)
+                SELECT start_ts, (start_ts + duration_secs * 1000), '[]', '', 'completed', created_at, 1, label
+                FROM offline_activities
+            """)
+
+            // 3. Drop old tables
+            try db.execute(sql: "DROP TABLE offline_activities")
+            try db.execute(sql: "DROP TABLE categories")
+            try db.execute(sql: "DROP TABLE category_rules")
+        }
+
+        migrator.registerMigration("v6_dynamic_categories") { db in
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS categories (
+                    id    TEXT PRIMARY KEY,
+                    name  TEXT NOT NULL,
+                    color TEXT NOT NULL,
+                    display_order INTEGER NOT NULL DEFAULT 0
+                );
+                
+                INSERT OR IGNORE INTO categories (id, name, color, display_order) VALUES ('focus', '专注工作', '#4A90D9', 0);
+                INSERT OR IGNORE INTO categories (id, name, color, display_order) VALUES ('daily', '日常事务', '#52C41A', 1);
+                INSERT OR IGNORE INTO categories (id, name, color, display_order) VALUES ('distraction', '其他干扰', '#F5222D', 2);
+            """)
+        }
+
         try migrator.migrate(pool)
     }
 

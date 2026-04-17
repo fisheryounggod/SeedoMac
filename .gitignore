@@ -1,7 +1,10 @@
-# Xcode
+# Xcode Generated
+SeedoMac.xcodeproj/
+SeedoMac.xcodeproj/project.xcworkspace/
 *.xcuserstate
 xcuserdata/
 DerivedData/
+build/
 *.pbxuser
 *.mode1v3
 *.mode2v3
@@ -9,18 +12,20 @@ DerivedData/
 *.moved-aside
 *.xccheckout
 *.xcscmblueprint
-build/
+
+# Binaries & Logs
+*.dmg
+SeedoMac.dmg
+SeedoMac*.png
+!SeedoMac.png
+!SeedoMac2.png
+build_log.txt
+*.log
 
 # Swift Package Manager
 .build/
 .swiftpm/
 
-# CocoaPods (not used here, but standard)
-Pods/
-
 # macOS
 .DS_Store
 *.DS_Store
-
-# Xcode export/signing config (local only)
-ExportOptions.plist

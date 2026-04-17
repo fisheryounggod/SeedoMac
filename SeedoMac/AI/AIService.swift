@@ -2,8 +2,13 @@
 import Foundation
 
 private let systemPrompt = """
-你是一位专注效率教练。根据用户提供的某一时间段（今天、本周、本月、本年或自定义区间）的电脑使用数据，生成一份简洁的工作复盘（200字以内）。
-包含：1）该时段的专注亮点；2）时间分配问题；3）一个具体改进建议。
+你是一位极致效率教练。根据用户提供的电脑使用数据、专注会话记录、离线活动日志以及设定的目标计划，生成一份专业的工作复盘（300字以内）。
+
+包含：
+1. **现状亮点**：基于数字和离线日志的专注成果。
+2. **目标校准 (Goal Calibration)**：对比设定的日/月/年计划，分析当前的进度偏差或达成情况。必须引用计划内容。
+3. **优化建议**：基于当前时间分配问题，给出具体的、可操作的改进策略。
+4. **评分与关键词**：
 最后给出该时段的专注评分（1-5分）和3个关键词，格式（必须在回复最后）：
 SCORE: X
 KEYWORDS: 关键词1, 关键词2, 关键词3
@@ -20,14 +25,10 @@ final class AIService {
         AppDatabase.shared.setting(for: "ai_model") ?? "gpt-4o-mini"
     }
 
-    /// Generates a summary for the given period (does NOT persist). Caller decides whether
-    /// to save via `persistSummary(_:)` — this enables the "Save to Log?" confirmation prompt.
+    /// Generates a summary for the given period (does NOT persist).
     func generateSummary(
-        periodKey: String,
+        context: SummaryContext,
         periodLabel: String,
-        apps: [AppStat],
-        categories: [CategoryStat],
-        totalSecs: Double,
         completion: @escaping (Result<DailySummary, Error>) -> Void
     ) {
         guard let apiKey = KeychainHelper.loadAPIKey(), !apiKey.isEmpty else {
@@ -35,10 +36,7 @@ final class AIService {
             return
         }
 
-        let userContent = buildPrompt(
-            periodLabel: periodLabel,
-            apps: apps, categories: categories, totalSecs: totalSecs
-        )
+        let userContent = buildPrompt(context: context, periodLabel: periodLabel)
         let body: [String: Any] = [
             "model": model,
             "stream": false,
@@ -47,7 +45,8 @@ final class AIService {
                 ["role": "user",   "content": userContent],
             ]
         ]
-
+        
+        // ... rest of network logic remains same ...
         guard let url = URL(string: "\(baseURL)/chat/completions"),
               let bodyData = try? JSONSerialization.data(withJSONObject: body) else {
             completion(.failure(AIError.invalidConfig))
@@ -72,7 +71,7 @@ final class AIService {
                   let content = message["content"] as? String else {
                 completion(.failure(AIError.badResponse)); return
             }
-            let summary = self.parseSummary(date: periodKey, content: content)
+            let summary = self.parseSummary(date: context.dateRange, content: content)
             completion(.success(summary))
         }.resume()
     }
@@ -80,30 +79,59 @@ final class AIService {
     /// Persists a summary (overwriting any existing row with the same date/periodKey)
     /// and posts `.dailySummaryDidSave` so the Log view can refresh.
     func persistSummary(_ summary: DailySummary) throws {
-        try OfflineStore().saveSummary(summary)
+        try WorkSessionStore().saveSummary(summary)
         NotificationCenter.default.post(name: .dailySummaryDidSave, object: nil)
     }
 
     // MARK: - Helpers
 
-    private func buildPrompt(periodLabel: String, apps: [AppStat], categories: [CategoryStat], totalSecs: Double) -> String {
+    private func buildPrompt(context: SummaryContext, periodLabel: String) -> String {
+        var lines = ["时间范围：\(periodLabel)", ""]
+        
+        // 1. Digital Activity (All-app baseline)
+        let totalSecs = context.topApps.reduce(0) { $0 + $1.totalSecs }
         let h = Int(totalSecs) / 3600
         let m = (Int(totalSecs) % 3600) / 60
-        var lines = ["时间范围：\(periodLabel)", "总使用时长：\(h)h \(m)m", "", "按分类："]
-        for cat in categories {
-            let pct = totalSecs > 0 ? Int(cat.totalSecs / totalSecs * 100) : 0
-            let ch = Int(cat.totalSecs) / 3600
-            let cm = (Int(cat.totalSecs) % 3600) / 60
-            lines.append("- \(cat.name)：\(ch)h \(cm)m（\(pct)%）")
-        }
-        lines += ["", "Top 应用："]
-        for (i, app) in apps.prefix(10).enumerated() {
+        lines += ["# 基础电脑统计", "记录时长：\(h)h \(m)m"]
+        
+        lines += ["", "核心应用使用时长："]
+        for (i, app) in context.topApps.prefix(12).enumerated() {
             let ah = Int(app.totalSecs) / 3600
             let am = (Int(app.totalSecs) % 3600) / 60
             lines.append("\(i+1). \(app.appOrDomain) - \(ah)h \(am)m")
         }
+
+        // 2. Focused Work Sessions (Unified Auto + Manual)
+        if !context.workSessions.isEmpty {
+            lines += ["", "# 工作实绩 (专注会话 & 手动记录)", "共计：\(context.workSessions.count) 段"]
+            for ws in context.workSessions.sorted(by: { $0.startTs < $1.startTs }) {
+                let start = Date(timeIntervalSince1970: Double(ws.startTs) / 1000)
+                let timeStr = AIService.timeFormatter.string(from: start)
+                let typePrefix = ws.isManual ? "[手动]" : "[自动]"
+                let label = ws.isManual ? (ws.title.isEmpty ? "未记录" : ws.title) : "专注会话"
+                lines.append("- \(typePrefix) \(timeStr) | \(Int(ws.durationSecs/60))m | \(label)")
+                if !ws.summary.isEmpty {
+                    lines.append("  备注：\(ws.summary)")
+                }
+            }
+        }
+
+        // 3. Goals/Plans Alignment
+        if context.planDaily != nil || context.planMonthly != nil || context.planYearly != nil {
+            lines += ["", "# 目标对齐 (Target Goals)", "请结合以下设定的目标评估："]
+            if let d = context.planDaily, !d.isEmpty { lines.append("- 今日任务: \(d)") }
+            if let m = context.planMonthly, !m.isEmpty { lines.append("- 本阶段计划: \(m)") }
+            if let y = context.planYearly, !y.isEmpty { lines.append("- 长期愿景: \(y)") }
+        }
+
         return lines.joined(separator: "\n")
     }
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
 
     private func parseSummary(date: String, content: String) -> DailySummary {
         var score = 0

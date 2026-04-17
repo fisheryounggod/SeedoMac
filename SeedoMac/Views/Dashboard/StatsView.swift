@@ -30,35 +30,105 @@ struct StatsView: View {
     @State private var customEnd: Date = Date()
     @State private var heatmapDays: [HeatmapDay] = []
     @State private var periodApps: [AppStat] = []
-    @State private var periodCats: [CategoryStat] = []
+    @State private var sessions: [WorkSession] = []
     @State private var isLoadingAI = false
     @State private var summary: DailySummary?
     @State private var pendingSummary: DailySummary? = nil
     @State private var showSavePrompt: Bool = false
     @State private var aiError: String? = nil
-    @State private var appCategories: [String: Category?] = [:]
-    @State private var allCats: [Category] = []
-    @State private var assigningApp: String? = nil
 
-    // Plan section (Change E)
+    // Editing & Deletion
+    @State private var editingSession: WorkSession? = nil
+    @State private var sessionToDelete: WorkSession? = nil
+    @State private var showingAddActivity = false
+    @State private var showingSettings = false
+    
+    // Folding & Sorting
+    @State private var expandedDays: Set<String> = []
+    
+    enum SortOrder: String, CaseIterable {
+        case newestFirst = "最新优先"
+        case oldestFirst = "最早优先"
+    }
+    @State private var historySortOrder: SortOrder = .newestFirst
+
+    // Plan section
     @State private var planScope: PlanScope = .daily
     @State private var planContent: String = ""
     @State private var planStatus: String? = nil
+    @State private var previousPlanScope: PlanScope = .daily
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                planSection
+            VStack(alignment: .leading, spacing: 25) {
                 heatmapSection
-                periodSelector
-                if period == .custom { customRangePicker }
-                HStack(alignment: .top, spacing: 20) {
-                    if !periodCats.isEmpty { pieSection }
-                    topAppsSection
+                
+                VStack(alignment: .leading, spacing: 15) {
+                    periodSelector
+                    if period == .custom { customRangePicker }
+                    
+                    HStack(alignment: .top, spacing: 20) {
+                        topAppsSection
+                        
+                        VStack(alignment: .leading, spacing: 20) {
+                            aiSummaryFocalSection
+                            compactPlanSection
+                        }
+                        .frame(width: 260)
+                    }
                 }
-                aiSummarySection
+                
+                historySection
             }
             .padding(20)
+        }
+        .sheet(item: $editingSession) { session in
+            WorkSessionEditorSheet(
+                session: session,
+                onSave: { updated in
+                    saveEditedSession(updated)
+                    editingSession = nil
+                },
+                onCancel: { editingSession = nil }
+            )
+        }
+        .sheet(isPresented: $showingAddActivity) {
+            AddActivitySheet(
+                onSave: { session in
+                    saveManualSession(session)
+                    showingAddActivity = false
+                },
+                onCancel: { showingAddActivity = false }
+            )
+        }
+        .sheet(isPresented: $showingSettings) {
+            VStack {
+                HStack {
+                    Text("设置").font(.headline)
+                    Spacer()
+                    Button("关闭") { showingSettings = false }
+                }
+                .padding()
+                SettingsView(appState: appState)
+            }
+            .frame(width: 450, height: 600)
+        }
+        .confirmationDialog(
+            "确定要删除这条记录吗？",
+            isPresented: Binding(
+                get: { sessionToDelete != nil },
+                set: { if !$0 { sessionToDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("删除", role: .destructive) {
+                if let s = sessionToDelete { deleteSession(s) }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            if let s = sessionToDelete {
+                Text("\(formatDuration(s.durationSecs)) 的 \(s.isManual ? "手动记录" : "专注段")")
+            }
         }
         .onAppear {
             loadData()
@@ -68,7 +138,6 @@ struct StatsView: View {
         .onChange(of: customStart) { _ in if period == .custom { loadPeriodData() } }
         .onChange(of: customEnd)   { _ in if period == .custom { loadPeriodData() } }
         .onChange(of: planScope) { newScope in
-            // Save outgoing scope's content before switching
             savePlan(scope: previousPlanScope, content: planContent, silent: true)
             previousPlanScope = newScope
             loadPlan(scope: newScope)
@@ -76,59 +145,90 @@ struct StatsView: View {
         .onDisappear {
             savePlan(scope: planScope, content: planContent, silent: true)
         }
-    }
-
-    /// Tracks the scope before onChange fires so we can persist outgoing content.
-    @State private var previousPlanScope: PlanScope = .daily
-
-    // MARK: - Sections
-
-    private var planSection: some View {
-        GroupBox("计划") {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Picker("", selection: $planScope) {
-                        ForEach(PlanScope.allCases) { scope in
-                            Text(scope.rawValue).tag(scope)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 240)
-
-                    Spacer()
-
-                    Text(planScopeLabel(planScope))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                TextEditor(text: $planContent)
-                    .font(.body)
-                    .frame(minHeight: 90, maxHeight: 160)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color.secondary.opacity(0.3))
-                    )
-
-                HStack {
-                    if let status = planStatus {
-                        Text(status)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("保存") {
-                        savePlan(scope: planScope, content: planContent, silent: false)
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-            .padding(.vertical, 4)
+        .onReceive(NotificationCenter.default.publisher(for: .shouldShowSettings)) { _ in
+            showingSettings = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .shouldShowAddActivity)) { _ in
+            showingAddActivity = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .shouldRunAISummary)) { _ in
+            generateAISummary()
         }
     }
 
+    // MARK: - Sections
+
+    private var compactPlanSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("\(planScope.rawValue)计划")
+                    .font(.headline)
+                    .foregroundStyle(.blue)
+                
+                Spacer()
+                
+                Menu {
+                    ForEach(PlanScope.allCases) { scope in
+                        Button(scope.rawValue) { planScope = scope }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .foregroundStyle(.secondary)
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+            }
+            
+            ZStack(alignment: .topLeading) {
+                if planContent.isEmpty {
+                    Text("写下计画...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary.opacity(0.5))
+                        .padding(.top, 8)
+                        .padding(.leading, 4)
+                        .allowsHitTesting(false)
+                }
+                TextEditor(text: $planContent)
+                    .font(.system(.body, design: .rounded))
+                    .scrollContentBackground(.hidden)
+                    .frame(height: 100)
+                    .padding(4)
+            }
+            .background(Color.secondary.opacity(0.04))
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.blue.opacity(0.1), lineWidth: 1)
+            )
+            
+            HStack {
+                if let status = planStatus {
+                    Text(status)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.green)
+                }
+                
+                Spacer()
+                
+                Button("保存") {
+                    savePlan(scope: planScope, content: planContent, silent: false)
+                }
+                .buttonStyle(.plain)
+                .font(.caption.bold())
+                .foregroundStyle(.blue)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.blue.opacity(0.1))
+                .cornerRadius(4)
+            }
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.03))
+        .cornerRadius(12)
+    }
+
     private var heatmapSection: some View {
-        GroupBox("This Year") {
+        GroupBox("活动热力图") {
             HeatmapView(days: heatmapDays)
                 .frame(height: 100)
         }
@@ -141,146 +241,39 @@ struct StatsView: View {
             }
         }
         .pickerStyle(.segmented)
-        .frame(maxWidth: 480)
+        .frame(maxWidth: 400)
     }
 
     private var customRangePicker: some View {
         HStack(spacing: 12) {
-            DatePicker("From", selection: $customStart, in: ...customEnd,
-                       displayedComponents: .date)
-                .datePickerStyle(.compact)
-                .labelsHidden()
+            DatePicker("From", selection: $customStart, in: ...customEnd, displayedComponents: .date)
+                .datePickerStyle(.compact).labelsHidden()
             Text("→").foregroundStyle(.secondary)
-            DatePicker("To", selection: $customEnd, in: customStart...Date(),
-                       displayedComponents: .date)
-                .datePickerStyle(.compact)
-                .labelsHidden()
+            DatePicker("To", selection: $customEnd, in: customStart...Date(), displayedComponents: .date)
+                .datePickerStyle(.compact).labelsHidden()
             Spacer()
         }
         .font(.caption)
     }
 
-    @ViewBuilder
-    private var pieSection: some View {
-        if #available(macOS 14.0, *) {
-            GroupBox("By Category") {
-                Chart(periodCats) { cat in
-                    SectorMark(
-                        angle: .value("Time", cat.totalSecs),
-                        innerRadius: .ratio(0.5)
-                    )
-                    .foregroundStyle(Color(hex: cat.color))
-                    .annotation(position: .overlay) {
-                        if cat.totalSecs / max(1, periodCats.reduce(0) { $0 + $1.totalSecs }) > 0.08 {
-                            Text(cat.name)
-                                .font(.caption2)
-                                .foregroundStyle(.white)
-                                .lineLimit(1)
-                        }
-                    }
-                }
-                .frame(height: 180)
-            }
-            .frame(maxWidth: 250)
-        } else {
-            GroupBox("By Category") {
-                VStack(spacing: 4) {
-                    ForEach(periodCats.prefix(5)) { cat in
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(Color(hex: cat.color))
-                                .frame(width: 8, height: 8)
-                            Text(cat.name)
-                                .font(.caption)
-                                .lineLimit(1)
-                            Spacer()
-                            Text(formatDuration(cat.totalSecs))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-            .frame(maxWidth: 250)
-        }
-    }
-
     private var topAppsSection: some View {
-        GroupBox("Top Apps") {
+        GroupBox(label: Label("热门应用", systemImage: "app.badge")) {
             if periodApps.isEmpty {
-                Text("No data for this period")
+                Text("暂无数据")
                     .foregroundStyle(.secondary)
-                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 20)
             } else {
                 VStack(spacing: 0) {
-                    ForEach(periodApps.prefix(10)) { app in
+                    ForEach(periodApps.prefix(8)) { app in
                         HStack {
                             Text(app.appOrDomain)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                             Spacer()
-                            // Category badge
-                            let cat = appCategories[app.appOrDomain] ?? nil
-                            Button {
-                                assigningApp = app.appOrDomain
-                            } label: {
-                                Text(cat?.name ?? "Untagged")
-                                    .font(.caption2)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color(hex: cat?.color ?? "#AAAAAA").opacity(0.2))
-                                    .foregroundStyle(Color(hex: cat?.color ?? "#AAAAAA"))
-                                    .clipShape(Capsule())
-                            }
-                            .buttonStyle(.plain)
-                            .popover(isPresented: Binding(
-                                get: { assigningApp == app.appOrDomain },
-                                set: { if !$0 { assigningApp = nil } }
-                            )) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Assign Category")
-                                        .font(.headline)
-                                        .padding([.top, .horizontal])
-                                    Divider()
-                                    if allCats.isEmpty {
-                                        Text("No categories defined")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .padding()
-                                    } else {
-                                        ForEach(allCats) { c in
-                                            Button {
-                                                let name = app.appOrDomain
-                                                DispatchQueue.global(qos: .userInitiated).async {
-                                                    try? CategoryStore().assignApp(name, toCategoryId: c.id)
-                                                    DispatchQueue.main.async {
-                                                        assigningApp = nil
-                                                        loadPeriodData()
-                                                    }
-                                                }
-                                            } label: {
-                                                HStack(spacing: 6) {
-                                                    Circle()
-                                                        .fill(Color(hex: c.color))
-                                                        .frame(width: 8, height: 8)
-                                                    Text(c.name)
-                                                }
-                                            }
-                                            .buttonStyle(.plain)
-                                            .padding(.horizontal)
-                                            .padding(.vertical, 2)
-                                        }
-                                    }
-                                    Divider()
-                                    Button("Cancel") { assigningApp = nil }
-                                        .padding([.bottom, .horizontal])
-                                }
-                                .frame(width: 200)
-                            }
                             Text(formatDuration(app.totalSecs))
+                                .font(.caption.monospacedDigit())
                                 .foregroundStyle(.secondary)
-                                .monospacedDigit()
                         }
                         .padding(.vertical, 4)
                         Divider()
@@ -291,67 +284,310 @@ struct StatsView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private var aiSummarySection: some View {
-        GroupBox("AI Summary") {
-            VStack(alignment: .leading, spacing: 8) {
+    private var aiSummaryFocalSection: some View {
+        GroupBox(label: Label("AI 深度复盘", systemImage: "sparkles")) {
+            VStack(alignment: .leading, spacing: 10) {
                 if let s = summary, !s.content.isEmpty {
-                    Text(s.content)
-                        .font(.body)
-                        .fixedSize(horizontal: false, vertical: true)
-                    HStack {
-                        Text(String(repeating: "⭐", count: min(5, s.score)))
-                        Spacer()
-                        Text(s.keywords
-                            .split(separator: ",")
-                            .map { $0.trimmingCharacters(in: .whitespaces) }
-                            .joined(separator: " · "))
-                            .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        MarkdownView(text: s.content, lineLimit: 5)
                             .font(.caption)
+                        
+                        HStack {
+                            HStack(spacing: 2) {
+                                ForEach(0..<5) { idx in
+                                    Image(systemName: "star.fill")
+                                        .font(.system(size: 8))
+                                        .foregroundStyle(idx < s.score ? .orange : .secondary.opacity(0.3))
+                                }
+                            }
+                            Spacer()
+                            Button("查看完整") { /* TODO: Show full dialog */ }
+                                .buttonStyle(.plain)
+                                .font(.caption2)
+                                .foregroundStyle(Color.accentColor)
+                        }
                     }
                 } else {
-                    Text("No summary yet for today.")
+                    Text("生成当前阶段的 AI 总结以获得深度洞察。")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
                 }
-                if let err = aiError {
-                    Text(err).foregroundStyle(.red).font(.caption)
+
+                Button(action: generateAISummary) {
+                    if isLoadingAI {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("立即生成", systemImage: "wand.and.stars")
+                    }
                 }
-                Button(isLoadingAI ? "Generating…" : "Generate \(period.rawValue) Summary") {
-                    generateAISummary()
-                }
-                .disabled(isLoadingAI)
                 .buttonStyle(.bordered)
+                .controlSize(.small)
+                .frame(maxWidth: .infinity)
+                .disabled(isLoadingAI)
             }
+            .padding(.vertical, 5)
         }
-        .alert("Save Summary to Log?", isPresented: $showSavePrompt, presenting: pendingSummary) { s in
-            Button("Save") {
-                DispatchQueue.global(qos: .userInitiated).async {
-                    do {
-                        try AIService.shared.persistSummary(s)
-                        DispatchQueue.main.async {
-                            // If this was today's summary, reflect it immediately in the card
-                            if s.date == Self.dateFormatter.string(from: Date()) {
-                                self.summary = s
+    }
+
+    private var historySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("活动历史", systemImage: "clock.arrow.circlepath")
+                    .font(.headline)
+                
+                Spacer()
+                
+                Picker("排序", selection: $historySortOrder) {
+                    ForEach(SortOrder.allCases, id: \.self) { order in
+                        Text(order.rawValue).tag(order)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .controlSize(.small)
+                
+                Button(action: { showingAddActivity = true }) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title2)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+            }
+            
+            let grouped = groupedSessions
+            let sortedDates = grouped.keys.sorted(by: {
+                historySortOrder == .newestFirst ? ($0 > $1) : ($0 < $1)
+            })
+            
+            if sessions.isEmpty {
+                Text("所选时段内无记录")
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 20)
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(sortedDates, id: \.self) { date in
+                        let isExpanded = expandedDays.contains(date)
+                        
+                        VStack(alignment: .leading, spacing: 0) {
+                            Button {
+                                withAnimation {
+                                    toggleDayExpanded(date)
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                                        .foregroundStyle(.secondary)
+                                    
+                                    Text(formatDateHeader(date))
+                                        .font(.caption2.bold())
+                                        .foregroundStyle(.secondary)
+                                    
+                                    Spacer()
+                                    
+                                    if !isExpanded {
+                                        let count = groupedSessions[date]?.count ?? 0
+                                        Text("\(count) 条记录")
+                                            .font(.system(size: 8))
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                }
+                                .padding(.vertical, 8)
+                                .padding(.horizontal, 4)
+                                .background(Color.secondary.opacity(0.05))
+                                .cornerRadius(6)
                             }
-                            self.pendingSummary = nil
+                            .buttonStyle(.plain)
+                            
+                            if isExpanded {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    let daySessions = groupedSessions[date] ?? []
+                                    let sortedSessions = daySessions.sorted(by: {
+                                        historySortOrder == .newestFirst ? ($0.startTs > $1.startTs) : ($0.startTs < $1.startTs)
+                                    })
+                                    
+                                    ForEach(sortedSessions) { session in
+                                        sessionRow(session)
+                                    }
+                                }
+                                .padding(.top, 10)
+                                .padding(.leading, 12)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                            }
                         }
-                    } catch {
-                        DispatchQueue.main.async {
-                            self.aiError = "Failed to save: \(error.localizedDescription)"
-                            self.pendingSummary = nil
-                        }
+                        .padding(.bottom, 5)
                     }
                 }
             }
-            Button("Discard", role: .cancel) { self.pendingSummary = nil }
-        } message: { s in
-            let preview = s.content.count > 240
-                ? String(s.content.prefix(240)) + "…"
-                : s.content
-            Text("[\(period.rawValue)] score \(s.score)/5\n\n\(preview)")
+        }
+    }
+    
+    private func toggleDayExpanded(_ date: String) {
+        if expandedDays.contains(date) {
+            expandedDays.remove(date)
+        } else {
+            expandedDays.insert(date)
+        }
+    }
+    
+    private var groupedSessions: [String: [WorkSession]] {
+        Dictionary(grouping: sessions) { session in
+            let date = Date(timeIntervalSince1970: Double(session.startTs) / 1000)
+            let f = DateFormatter()
+            f.dateFormat = "yyyy-MM-dd"
+            return f.string(from: date)
+        }
+    }
+    
+    private func formatDateHeader(_ dateStr: String) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        guard let date = f.date(from: dateStr) else { return dateStr }
+        
+        let cal = Calendar.current
+        if cal.isDateInToday(date) { return "今天 " + dateStr }
+        if cal.isDateInYesterday(date) { return "昨天 " + dateStr }
+        return dateStr
+    }
+
+    private func sessionRow(_ session: WorkSession) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack {
+                Circle()
+                    .fill(session.isManual ? Color.orange : Color.blue)
+                    .frame(width: 8, height: 8)
+                    .padding(.top, 5)
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.2))
+                    .frame(width: 1)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    let cat = SessionCategory.find(session.categoryId)
+                    let displayTitle = session.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? cat.name : session.summary
+                    
+                    Text(displayTitle)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    
+                    if session.categoryId != nil {
+                        Text(cat.name)
+                            .font(.system(size: 8, weight: .bold))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(cat.color.opacity(0.2))
+                            .foregroundStyle(cat.color)
+                            .cornerRadius(3)
+                    }
+                    
+                    Spacer()
+                    Text(formatDuration(session.durationSecs))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                
+                if !session.title.isEmpty {
+                    Text("备注: " + session.title)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary.opacity(0.6))
+                        .padding(.vertical, 2)
+                        .lineLimit(nil)
+                }
+                
+                if !session.isManual {
+                    let apps = session.topApps
+                    if !apps.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(apps.prefix(3)) { app in
+                                    Text(app.appOrDomain)
+                                        .font(.system(size: 9))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color.secondary.opacity(0.1))
+                                        .cornerRadius(4)
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                Text(formatTimestamp(session.startTs))
+                    .font(.system(size: 8))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(12)
+            .background(Color.secondary.opacity(0.04))
+            .cornerRadius(10)
+            .onTapGesture(count: 2) {
+                editingSession = session
+            }
+            .contextMenu {
+                Button {
+                    editingSession = session
+                } label: {
+                    Label("编辑", systemImage: "pencil")
+                }
+                
+                Button(role: .destructive) {
+                    sessionToDelete = session
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
+            }
         }
     }
 
     // MARK: - Data Loading
+    
+    private func saveManualSession(_ session: WorkSession) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                var s = session
+                try WorkSessionStore().insert(&s)
+                // Also sync to calendar if enabled
+                CalendarSyncService.shared.sync(session: s)
+                
+                DispatchQueue.main.async {
+                    loadData()
+                }
+            } catch {
+                print("[StatsView] Save manual failed: \(error)")
+            }
+        }
+    }
+
+    private func deleteSession(_ session: WorkSession) {
+        guard let id = session.id else { return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try WorkSessionStore().delete(id: id)
+                DispatchQueue.main.async {
+                    loadData()
+                }
+            } catch {
+                print("[StatsView] Delete failed: \(error)")
+            }
+        }
+    }
+
+    private func saveEditedSession(_ session: WorkSession) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try WorkSessionStore().update(session)
+                DispatchQueue.main.async {
+                    loadData()
+                }
+            } catch {
+                print("[StatsView] Update failed: \(error)")
+            }
+        }
+    }
 
     private func loadData() {
         loadHeatmap()
@@ -368,58 +604,34 @@ struct StatsView: View {
     }
 
     private func loadPeriodData() {
-        // top-level range request — fetch raw apps then filter excluded categories
         let (startMs, endMs) = periodRange()
-        // Pull a bigger window than the top-10 limit so filtering still yields 10 apps
         DispatchQueue.global(qos: .userInitiated).async {
-            let rawApps = (try? EventStore().topApps(startMs: startMs, endMs: endMs, limit: 50)) ?? []
-            let catStore2 = CategoryStore()
-            let allCategories = (try? catStore2.allCategories()) ?? []
-
-            // Build per-app category map once, reuse for filter + display
-            var catMap: [String: Category?] = [:]
-            for app in rawApps {
-                catMap[app.appOrDomain] = try? catStore2.matchCategory(for: app.appOrDomain, title: "")
-            }
-
-            // Drop apps whose matched category is excluded from stats
-            let includedApps = rawApps.filter { app in
-                if let cat = catMap[app.appOrDomain] ?? nil, cat.includeInStats == false {
-                    return false
-                }
-                return true
-            }
-            let limitedApps = Array(includedApps.prefix(10))
-            let cats = buildCategoryStats(apps: includedApps, catMap: catMap)
+            // Raw apps
+            let apps = (try? EventStore().topApps(startMs: startMs, endMs: endMs, limit: 15)) ?? []
+            // Sessions
+            let sessions = (try? WorkSessionStore().sessions(from: startMs, to: endMs)) ?? []
 
             DispatchQueue.main.async {
-                self.periodApps = limitedApps
-                self.periodCats = cats
-                self.allCats = allCategories
-                self.appCategories = catMap
+                self.periodApps = apps
+                self.sessions = sessions
+                
+                // Auto-fold logic: if spanning > 1 day, start collapsed
+                let cal = Calendar.current
+                let isMultiDay = self.period != .today
+                if isMultiDay {
+                    self.expandedDays = []
+                } else {
+                    // Always expand today if viewing today
+                    self.expandedDays = [Self.dateFormatter.string(from: Date())]
+                }
             }
         }
-    }
-
-    private func buildCategoryStats(apps: [AppStat], catMap: [String: Category?]) -> [CategoryStat] {
-        var totals: [String: (name: String, color: String, secs: Double)] = [:]
-        for app in apps {
-            if let cat = catMap[app.appOrDomain] ?? nil, cat.includeInStats {
-                var e = totals[cat.id] ?? (cat.name, cat.color, 0.0)
-                e.secs += app.totalSecs
-                totals[cat.id] = e
-            }
-        }
-        return totals
-            .map { CategoryStat(id: $0.key, name: $0.value.name,
-                                color: $0.value.color, totalSecs: $0.value.secs) }
-            .sorted { $0.totalSecs > $1.totalSecs }
     }
 
     private func loadSummary() {
         let date = Self.dateFormatter.string(from: Date())
         DispatchQueue.global(qos: .userInitiated).async {
-            let s = try? OfflineStore().summary(for: date)
+            let s = try? WorkSessionStore().summary(for: date)
             DispatchQueue.main.async { self.summary = s }
         }
     }
@@ -427,116 +639,27 @@ struct StatsView: View {
     private func generateAISummary() {
         isLoadingAI = true
         aiError = nil
-        let apps = periodApps
-        let total = apps.reduce(0.0) { $0 + $1.totalSecs }
-        let cats  = periodCats
-        let key   = periodKey()
+        let key = periodKey()
         let label = periodLabel()
 
-        AIService.shared.generateSummary(
-            periodKey: key, periodLabel: label,
-            apps: apps, categories: cats, totalSecs: total
-        ) { result in
-            DispatchQueue.main.async {
-                self.isLoadingAI = false
-                switch result {
-                case .success(let s):
-                    self.pendingSummary = s
-                    self.showSavePrompt = true
-                case .failure(let e):
-                    self.aiError = e.localizedDescription
-                }
-            }
-        }
-    }
-
-    /// Period identifier used as the `DailySummary.date` primary key.
-    /// - .today  → "YYYY-MM-DD" (single date, backward-compatible)
-    /// - others  → "YYYY-MM-DD..YYYY-MM-DD" range syntax
-    private func periodKey() -> String {
-        let (startMs, endMs) = periodRange()
-        let startDate = Date(timeIntervalSince1970: Double(startMs) / 1000)
-        let endDate   = Date(timeIntervalSince1970: Double(endMs)   / 1000)
-        let startStr  = Self.dateFormatter.string(from: startDate)
-        let endStr    = Self.dateFormatter.string(from: endDate)
-        if startStr == endStr { return startStr }
-        return "\(startStr)..\(endStr)"
-    }
-
-    private func periodLabel() -> String {
-        switch period {
-        case .today:  return "Today"
-        case .week:   return "Past 7 days"
-        case .month:  return "Past month"
-        case .year:   return "Past year"
-        case .custom:
-            let s = Self.dateFormatter.string(from: customStart)
-            let e = Self.dateFormatter.string(from: customEnd)
-            return "\(s) — \(e)"
-        }
-    }
-
-    // MARK: - Plan persistence (Change E)
-
-    /// Builds the settings-KV key for a given plan scope. The bucketing date
-    /// stamp rolls automatically: a new day creates a new daily key, a new
-    /// month creates a new monthly key, etc.
-    private func planKey(for scope: PlanScope, on date: Date = Date()) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        switch scope {
-        case .daily:
-            f.dateFormat = "yyyy-MM-dd"
-            return "plan_daily:\(f.string(from: date))"
-        case .monthly:
-            f.dateFormat = "yyyy-MM"
-            return "plan_monthly:\(f.string(from: date))"
-        case .yearly:
-            f.dateFormat = "yyyy"
-            return "plan_yearly:\(f.string(from: date))"
-        }
-    }
-
-    /// Human-readable current-bucket label shown next to the scope picker.
-    private func planScopeLabel(_ scope: PlanScope) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        switch scope {
-        case .daily:
-            f.dateFormat = "yyyy-MM-dd"
-            return f.string(from: Date())
-        case .monthly:
-            f.dateFormat = "yyyy-MM"
-            return f.string(from: Date())
-        case .yearly:
-            f.dateFormat = "yyyy"
-            return f.string(from: Date())
-        }
-    }
-
-    private func loadPlan(scope: PlanScope) {
-        let key = planKey(for: scope)
         DispatchQueue.global(qos: .userInitiated).async {
-            let content = AppDatabase.shared.setting(for: key) ?? ""
-            DispatchQueue.main.async {
-                self.planContent = content
-            }
-        }
-    }
-
-    /// Persists the given plan content to the settings KV table. `silent=true`
-    /// suppresses the confirmation label so auto-save on scope-switch or view
-    /// disappearance doesn't flash UI text.
-    private func savePlan(scope: PlanScope, content: String, silent: Bool) {
-        let key = planKey(for: scope)
-        DispatchQueue.global(qos: .userInitiated).async {
-            AppDatabase.shared.saveSetting(key: key, value: content)
-            if !silent {
-                DispatchQueue.main.async {
-                    self.planStatus = "已保存 ✓"
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                        self.planStatus = nil
+            do {
+                let context = try SummaryContextBuilder().build(for: key)
+                AIService.shared.generateSummary(context: context, periodLabel: label) { result in
+                    DispatchQueue.main.async {
+                        self.isLoadingAI = false
+                        switch result {
+                        case .success(let s):
+                            self.pendingSummary = s
+                            self.showSavePrompt = true
+                        case .failure(let e): self.aiError = e.localizedDescription
+                        }
                     }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.isLoadingAI = false
+                    self.aiError = error.localizedDescription
                 }
             }
         }
@@ -544,12 +667,60 @@ struct StatsView: View {
 
     // MARK: - Helpers
 
+    private func formatTimestamp(_ ts: Int64) -> String {
+        let date = Date(timeIntervalSince1970: Double(ts) / 1000)
+        let f = DateFormatter()
+        f.timeStyle = .short
+        f.dateStyle = .none
+        return f.string(from: date)
+    }
+
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
-        f.locale = Locale(identifier: "en_US_POSIX")
         return f
     }()
+
+    private func planKey(for scope: PlanScope, on date: Date = Date()) -> String {
+        let f = DateFormatter()
+        switch scope {
+        case .daily: f.dateFormat = "yyyy-MM-dd"
+        case .monthly: f.dateFormat = "yyyy-MM"
+        case .yearly: f.dateFormat = "yyyy"
+        }
+        return "plan_\(scope.id):\(f.string(from: date))"
+    }
+
+    private func planScopeLabel(_ scope: PlanScope) -> String {
+        let f = DateFormatter()
+        switch scope {
+        case .daily: f.dateFormat = "yyyy-MM-dd"
+        case .monthly: f.dateFormat = "yyyy-MM"
+        case .yearly: f.dateFormat = "yyyy"
+        }
+        return f.string(from: Date())
+    }
+
+    private func loadPlan(scope: PlanScope) {
+        let key = planKey(for: scope)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let content = AppDatabase.shared.setting(for: key) ?? ""
+            DispatchQueue.main.async { self.planContent = content }
+        }
+    }
+
+    private func savePlan(scope: PlanScope, content: String, silent: Bool) {
+        let key = planKey(for: scope)
+        DispatchQueue.global(qos: .userInitiated).async {
+            AppDatabase.shared.saveSetting(key: key, value: content)
+            if !silent {
+                DispatchQueue.main.async {
+                    self.planStatus = "已保存 ✓"
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.planStatus = nil }
+                }
+            }
+        }
+    }
 
     private func periodRange() -> (Int64, Int64) {
         let now = Date()
@@ -570,12 +741,24 @@ struct StatsView: View {
             return (Int64(start.timeIntervalSince1970 * 1000), endMs)
         case .custom:
             let startOfDay = cal.startOfDay(for: customStart)
-            // End-of-day for customEnd (exclusive 24h after its startOfDay), clamped to now
-            let endOfDay   = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: customEnd)) ?? customEnd
-            let clampedEnd = min(endOfDay, now)
-            return (Int64(startOfDay.timeIntervalSince1970 * 1000),
-                    Int64(clampedEnd.timeIntervalSince1970 * 1000))
+            let endOfDay = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: customEnd)) ?? customEnd
+            return (Int64(startOfDay.timeIntervalSince1970 * 1000), Int64(min(endOfDay, now).timeIntervalSince1970 * 1000))
         }
     }
 
+    private func periodKey() -> String {
+        let (startMs, _) = periodRange()
+        let startDate = Date(timeIntervalSince1970: Double(startMs) / 1000)
+        return Self.dateFormatter.string(from: startDate)
+    }
+
+    private func periodLabel() -> String {
+        switch period {
+        case .today: return "Today"
+        case .week: return "Past 7 days"
+        case .month: return "Past month"
+        case .year: return "Past year"
+        case .custom: return "\(Self.dateFormatter.string(from: customStart)) — \(Self.dateFormatter.string(from: customEnd))"
+        }
+    }
 }
