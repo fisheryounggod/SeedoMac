@@ -22,6 +22,7 @@ struct SettingsView: View {
     @State private var breakDuration: Int = 5
     @State private var breakLongDuration: Int = 15
     @State private var breakLongFrequency: Int = 4
+    @State private var breakLongEnabled: Bool = true
     @State private var breakEnabledToday: Bool = true
     @State private var breakBackgroundColor: Color = .black
     @State private var breakBackgroundImagePath: String = ""
@@ -145,6 +146,9 @@ struct SettingsView: View {
             }
 
             Section("循环休息 (Pomodoro)") {
+                Toggle("启用长休息", isOn: $breakLongEnabled)
+                    .font(.subheadline)
+
                 HStack {
                     Text("长休息频率")
                     Spacer()
@@ -156,6 +160,8 @@ struct SettingsView: View {
                     Stepper("", value: $breakLongFrequency, in: 1...10, step: 1)
                 }
                 .font(.subheadline)
+                .opacity(breakLongEnabled ? 1.0 : 0.5)
+                .disabled(!breakLongEnabled)
 
                 HStack {
                     Text("长休息时长")
@@ -166,6 +172,8 @@ struct SettingsView: View {
                     Text("分钟")
                     Stepper("", value: $breakLongDuration, in: 5...60, step: 1)
                 }
+                .disabled(!breakLongEnabled)
+                .opacity(breakLongEnabled ? 1.0 : 0.5)
             }
 
             Section("外观与个性化") {
@@ -366,6 +374,7 @@ struct SettingsView: View {
         breakDuration = Int(AppDatabase.shared.setting(for: "break_duration_mins") ?? "5") ?? 5
         breakLongDuration = Int(AppDatabase.shared.setting(for: "break_long_duration_mins") ?? "15") ?? 15
         breakLongFrequency = Int(AppDatabase.shared.setting(for: "break_long_frequency") ?? "4") ?? 4
+        breakLongEnabled = (AppDatabase.shared.setting(for: "break_long_enabled") != "false")
         
         let todayStr = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none)
         let disabledDay = AppDatabase.shared.setting(for: "break_disabled_day") ?? ""
@@ -407,6 +416,7 @@ struct SettingsView: View {
         AppDatabase.shared.saveSetting(key: "break_duration_mins", value: String(breakDuration))
         AppDatabase.shared.saveSetting(key: "break_long_duration_mins", value: String(breakLongDuration))
         AppDatabase.shared.saveSetting(key: "break_long_frequency", value: String(breakLongFrequency))
+        AppDatabase.shared.saveSetting(key: "break_long_enabled", value: breakLongEnabled ? "true" : "false")
         AppDatabase.shared.saveSetting(key: "break_background_hex", value: colorToHex(breakBackgroundColor))
         AppDatabase.shared.saveSetting(key: "break_background_image_path", value: breakBackgroundImagePath)
         AppDatabase.shared.saveSetting(key: "calendar_sync_enabled", value: calendarSyncEnabled ? "true" : "false")

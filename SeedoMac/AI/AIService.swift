@@ -2,14 +2,16 @@
 import Foundation
 
 private let systemPrompt = """
-你是一位极致效率教练。根据用户提供的电脑使用数据、专注会话记录、离线活动日志以及设定的目标计划，生成一份专业的工作复盘（300字以内）。
+你是一位严谨的个人效能教练。
+任务：请根据我提供的时间统计数据和目标计划，生成一份“深度工作复盘报告”。
 
-重点分析：
-1. **现状亮点**：基于数字和离线日志的专注成果。
-2. **目标校准 (Target Calibration)**：对比设定的日/月/年计划，量化分析当前的进度偏差或达成情况。必须引用计划内容并指出计划与实际的 Gap（差距）。
-3. **优化建议**：基于当前时间分配问题，输出下一步的具体改进策略。
+要求及输出格式：
+1. **数据脱水 (Data Dehydration)**：精准区分“工具磨刀时间”与“核心产出时间”，量化计算目标达成率。
+2. **偏差诊断 (Gap Diagnosis)**：识别是否存在“低水平勤奋”或“目标偏移”，并直接指出痛点。
+3. **行动修正 (Action Correction)**：基于最小阻力原则，给出明天前三个专注块的具体任务建议。
+4. **视觉评分 (Visual Scoring)**：根据“目标相关度”而非“忙碌程度”进行 1-5 分评分。
 
-最后给出 1-5 分的评分和 3 个关键词，格式必须严格如下（位于回复最后）：
+请确保回复简洁有力，直击要害。在回复的最后，请严格按照以下格式提供评分和关键词，以便系统解析：
 SCORE: X
 KEYWORDS: 关键词1, 关键词2, 关键词3
 """
@@ -36,6 +38,26 @@ final class AIService {
             return
         }
 
+        let systemPrompt = """
+你在为一位寻求极致效能的专业人士提供复盘。
+请基于数据生成一份结构极其压缩、信息密度极高的“深度工作复盘简报”。
+
+#### 核心规则：
+1. **严格限制字数**：每一项内容控制在 15 字以内，严禁完整长句。
+2. **必须使用语义 Emoji 引导**（用于触发 UI 颜色渲染）：
+   - 🔴 开头：代表痛点、干扰、不达标 (RED)
+   - 🟢 开头：代表核心产出、高度专注、达标 (GREEN)
+   - 🔵 开头：代表明日动作、修正建议 (BLUE)
+   - 🟡 开头：代表洞察、趋势、警告 (ORANGE)
+3. **内容结构**：
+## 1. 复盘 (Metrics & Gaps)
+- 以 🟢 或 🔴 引导数据核心结论。
+## 2. 修正 (Actions)
+- 以 🔵 引导明天前三个专注块的具体建议。
+## 3. 评分 (Score)
+- SCORE: X
+- KEYWORDS: 词1, 词2, 词3
+"""
         let userContent = buildPrompt(context: context, periodLabel: periodLabel)
         let body: [String: Any] = [
             "model": model,
@@ -46,7 +68,6 @@ final class AIService {
             ]
         ]
         
-        // ... rest of network logic remains same ...
         guard let url = URL(string: "\(baseURL)/chat/completions"),
               let bodyData = try? JSONSerialization.data(withJSONObject: body) else {
             completion(.failure(AIError.invalidConfig))
@@ -140,11 +161,14 @@ final class AIService {
         var keywords = ""
         var bodyLines: [String] = []
 
+        // Robust parsing for SCORE: X and KEYWORDS: ...
         for line in content.components(separatedBy: "\n") {
-            if line.hasPrefix("SCORE:") {
-                score = Int(line.dropFirst(6).trimmingCharacters(in: .whitespaces)) ?? 0
-            } else if line.hasPrefix("KEYWORDS:") {
-                keywords = line.dropFirst(9).trimmingCharacters(in: .whitespaces)
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("SCORE:") {
+                let val = trimmed.dropFirst(6).trimmingCharacters(in: .whitespaces)
+                score = Int(val) ?? 0
+            } else if trimmed.hasPrefix("KEYWORDS:") {
+                keywords = trimmed.dropFirst(9).trimmingCharacters(in: .whitespaces)
             } else {
                 bodyLines.append(line)
             }

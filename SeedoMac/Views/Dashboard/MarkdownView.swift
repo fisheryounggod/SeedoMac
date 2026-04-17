@@ -13,24 +13,25 @@ struct MarkdownView: View {
     private func renderContent(_ raw: String) -> some View {
         let blocks = computeBlocks(raw)
         
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 12) { // Increased spacing between blocks
             ForEach(0..<blocks.count, id: \.self) { index in
                 switch blocks[index] {
                 case .text(let t):
                     let attr = parseAttributedString(t.trimmingCharacters(in: .newlines))
                     Text(attr)
+                        .lineSpacing(6) // Improved line spacing
                         .lineLimit(lineLimit)
-                        .fixedSize(horizontal: false, vertical: false) // Changed from vertical: true to allow expansion
+                        .fixedSize(horizontal: false, vertical: false)
                 case .table(let t):
                     ScrollView(.horizontal, showsIndicators: false) {
                         Text(t.trimmingCharacters(in: .newlines))
                             .font(.system(.caption, design: .monospaced))
-                            .padding(8)
-                            .background(Color.secondary.opacity(0.05))
-                            .cornerRadius(4)
+                            .padding(12)
+                            .background(Color.primary.opacity(0.04))
+                            .cornerRadius(8)
                             .overlay(
-                                RoundedRectangle(cornerRadius: 4)
-                                    .stroke(Color.secondary.opacity(0.1), lineWidth: 1)
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.primary.opacity(0.1), lineWidth: 1)
                             )
                     }
                 }
@@ -38,6 +39,7 @@ struct MarkdownView: View {
         }
     }
     
+    // ... [rest of methods] ...
     private func computeBlocks(_ raw: String) -> [MarkdownBlock] {
         let lines = raw.components(separatedBy: .newlines)
         var blocks: [MarkdownBlock] = []
@@ -87,10 +89,37 @@ struct MarkdownView: View {
         
         // 2. Initial MD parse
         var options = AttributedString.MarkdownParsingOptions()
-        options.interpretedSyntax = .full // Allows headers, lists, etc.
+        options.interpretedSyntax = .full 
         var attrStr = (try? AttributedString(markdown: str, options: options)) ?? AttributedString(str)
         
-        // 3. Handle ==highlight==
+        // 3. Styling passes
+        for run in attrStr.runs {
+            // Fix header sizes & weights
+            if let intent = run.presentationIntent {
+                for component in intent.components {
+                    if case .header(let level) = component.kind {
+                        let range = run.range
+                        if level == 1 || level == 2 {
+                            attrStr[range].font = .system(size: 18, weight: .bold, design: .rounded)
+                            attrStr[range].foregroundColor = .primary
+                        } else if level == 3 {
+                            attrStr[range].font = .system(size: 15, weight: .bold, design: .rounded)
+                            attrStr[range].foregroundColor = .secondary
+                        }
+                    }
+                }
+            }
+            
+            // Internal links
+            if let url = run.link, url.scheme == "internal" {
+                let range = run.range
+                attrStr[range].link = nil 
+                attrStr[range].foregroundColor = Color.accentColor
+                attrStr[range].underlineStyle = Text.LineStyle.single
+            }
+        }
+        
+        // 4. Handle ==highlight==
         let rawString = String(attrStr.characters)
         if let regex = try? NSRegularExpression(pattern: "==([^=]+)==", options: []) {
             let nsRange = NSRange(rawString.startIndex..<rawString.endIndex, in: rawString)
@@ -103,20 +132,25 @@ struct MarkdownView: View {
                 let content = attrStr[innerRange]
                 var highlighted = AttributedString(content)
                 highlighted.backgroundColor = Color.yellow.opacity(0.3)
-                // Use a slightly bolder weight for highlights
                 highlighted.inlinePresentationIntent = InlinePresentationIntent.stronglyEmphasized
                 
                 attrStr.replaceSubrange(range, with: highlighted)
             }
         }
         
-        // 4. Style internal links
-        for run in attrStr.runs {
-            if let url = run.link, url.scheme == "internal" {
-                let range = run.range
-                attrStr[range].link = nil 
-                attrStr[range].foregroundColor = Color.accentColor
-                attrStr[range].underlineStyle = Text.LineStyle.single
+        // 5. Emoji Semantic Coloring Pass
+        // Detect lines/segments starting with 🔴, 🟢, 🔵, 🟡 and color the whole run
+        let runs = attrStr.runs
+        for run in runs {
+            let runText = String(attrStr[run.range].characters)
+            if runText.starts(with: "🔴") {
+                attrStr[run.range].foregroundColor = .red
+            } else if runText.starts(with: "🟢") {
+                attrStr[run.range].foregroundColor = .green
+            } else if runText.starts(with: "🔵") {
+                attrStr[run.range].foregroundColor = .blue
+            } else if runText.starts(with: "🟡") {
+                attrStr[run.range].foregroundColor = .orange
             }
         }
         

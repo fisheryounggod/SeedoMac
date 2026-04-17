@@ -12,6 +12,8 @@ struct BreakConfig {
     var longBreakFrequency: Int
     /// Whether the break reminder is enabled today.
     var isEnabledToday: Bool
+    /// Whether long breaks are enabled in the cycle.
+    var isLongBreakEnabled: Bool
     /// Background color hex string.
     var backgroundColorHex: String
     /// Custom background image path.
@@ -27,6 +29,7 @@ struct BreakConfig {
         let disabledDay = AppDatabase.shared.setting(for: "break_disabled_day") ?? ""
         let bgHex = AppDatabase.shared.setting(for: "break_background_hex") ?? "#000000"
         let bgImg = AppDatabase.shared.setting(for: "break_background_image_path")
+        let lEnabled = AppDatabase.shared.setting(for: "break_long_enabled") != "false"
         
         return BreakConfig(
             workIntervalMins: work,
@@ -34,6 +37,7 @@ struct BreakConfig {
             longBreakDurationMins: lDur,
             longBreakFrequency: freq,
             isEnabledToday: disabledDay != todayStr,
+            isLongBreakEnabled: lEnabled,
             backgroundColorHex: bgHex,
             backgroundImagePath: bgImg
         )

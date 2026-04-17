@@ -32,7 +32,8 @@ final class BreakScheduler: ObservableObject {
     }
     
     var isLongBreak: Bool {
-        sessionsSinceLongBreak >= config.longBreakFrequency - 1
+        guard config.isLongBreakEnabled else { return false }
+        return sessionsSinceLongBreak >= config.longBreakFrequency - 1
     }
  
     private func setupObservers() {

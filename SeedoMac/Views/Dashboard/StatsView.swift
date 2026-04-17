@@ -30,12 +30,46 @@ struct StatsView: View {
     @State private var customEnd: Date = Date()
     @State private var heatmapDays: [HeatmapDay] = []
     @State private var periodApps: [AppStat] = []
-    @State private var sessions: [WorkSession] = []
+    
+    enum LogItem: Identifiable {
+        case session(WorkSession)
+        case summary(DailySummary)
+        
+        var id: String {
+            switch self {
+            case .session(let s): return "s-\(s.id ?? 0)"
+            case .summary(let sum): return "sum-\(sum.date)"
+            }
+        }
+        
+        var timestamp: Int64 {
+            switch self {
+            case .session(let s): return s.startTs
+            case .summary(let sum):
+                // Put summary towards the end of its day (23:59:59)
+                let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+                if let date = f.date(from: sum.date) {
+                    return Int64(date.timeIntervalSince1970 * 1000) + 86_399_999
+                }
+                return sum.createdAt
+            }
+        }
+    }
+    
+    @State private var historyItems: [LogItem] = []
     @State private var isLoadingAI = false
     @State private var summary: DailySummary?
     @State private var pendingSummary: DailySummary? = nil
     @State private var showSavePrompt: Bool = false
     @State private var aiError: String? = nil
+    
+    struct TrendPoint: Identifiable {
+        let id = UUID()
+        let timeLabel: String
+        let category: SessionCategory
+        let durationSecs: Double
+    }
+    @State private var trendPoints: [TrendPoint] = []
 
     // Editing & Deletion
     @State private var editingSession: WorkSession? = nil
@@ -51,37 +85,37 @@ struct StatsView: View {
         case oldestFirst = "最早优先"
     }
     @State private var historySortOrder: SortOrder = .newestFirst
+    
+    // Visualization State
+    @State private var isHoveringTagChart: Bool = false
+    @State private var hoveredAngle: Double? = nil
 
-    // Plan section
-    @State private var planScope: PlanScope = .daily
-    @State private var planContent: String = ""
+    // Plan section (Unified)
+    @State private var dailyPlan: String = ""
+    @State private var monthlyPlan: String = ""
+    @State private var yearlyPlan: String = ""
+    @State private var editingScope: PlanScope? = nil
     @State private var planStatus: String? = nil
-    @State private var previousPlanScope: PlanScope = .daily
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 30) {
-                heatmapSection
+            VStack(alignment: .leading, spacing: 25) {
+                // 1. Top Compact Plan Ribbon
+                unifiedPlanBoard
+                    .padding(.bottom, 5)
+                
+                // 2. Main Trend
+                trendChartSection
                 
                 VStack(alignment: .leading, spacing: 20) {
                     periodSelector
                     if period == .custom { customRangePicker }
                     
-                    // Main Stats Row
-                    HStack(alignment: .top, spacing: 20) {
-                        topAppsSection
-                            .frame(maxWidth: .infinity)
-                        
-                        tagStatsSection
-                            .frame(width: 300)
-                    }
+                    // 3. Stats Analytics Cards (Aligned)
+                    statsCardsRow
                     
-                    // Full-width AI Summary
+                    // 4. AI Insight Highlights
                     aiSummaryFocalSection
-                        .frame(maxWidth: .infinity)
-                    
-                    // Full-width Plan
-                    compactPlanSection
                         .frame(maxWidth: .infinity)
                 }
                 
@@ -139,19 +173,11 @@ struct StatsView: View {
         }
         .onAppear {
             loadData()
-            loadPlan(scope: planScope)
+            loadAllPlans()
         }
         .onChange(of: period) { _ in loadPeriodData() }
         .onChange(of: customStart) { _ in if period == .custom { loadPeriodData() } }
         .onChange(of: customEnd)   { _ in if period == .custom { loadPeriodData() } }
-        .onChange(of: planScope) { newScope in
-            savePlan(scope: previousPlanScope, content: planContent, silent: true)
-            previousPlanScope = newScope
-            loadPlan(scope: newScope)
-        }
-        .onDisappear {
-            savePlan(scope: planScope, content: planContent, silent: true)
-        }
         .onReceive(NotificationCenter.default.publisher(for: .shouldShowSettings)) { _ in
             showingSettings = true
         }
@@ -165,79 +191,114 @@ struct StatsView: View {
 
     // MARK: - Sections
 
-    private var compactPlanSection: some View {
+    // MARK: - Unified Plan Board
+    
+    private var unifiedPlanBoard: some View {
+        HStack(spacing: 20) {
+            planItemCompact(title: "日度", content: dailyPlan, color: .blue)
+            Divider().frame(height: 16).opacity(0.3)
+            planItemCompact(title: "月度", content: monthlyPlan, color: .purple)
+            Divider().frame(height: 16).opacity(0.3)
+            planItemCompact(title: "年度", content: yearlyPlan, color: .orange)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Color.primary.opacity(0.04))
+        .cornerRadius(12)
+        .onTapGesture(count: 2) {
+            isEditingPlans = true
+        }
+    }
+    
+    private func planItemCompact(title: String, content: String?, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(color)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background(color.opacity(0.1))
+                .cornerRadius(4)
+            
+            Text(content?.isEmpty == false ? content!.replacingOccurrences(of: "\n", with: " ") : "未设定")
+                .font(.system(size: 13, weight: .regular, design: .rounded))
+                .lineLimit(1)
+                .foregroundStyle(content?.isEmpty == false ? .primary : .secondary.opacity(0.6))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    
+    private func binding(for scope: PlanScope) -> Binding<String> {
+        switch scope {
+        case .daily: return $dailyPlan
+        case .monthly: return $monthlyPlan
+        case .yearly: return $yearlyPlan
+        }
+    }
+
+    private var trendChartSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("\(planScope.rawValue)计划")
+                Label("专注趋势", systemImage: "chart.xyaxis.line")
                     .font(.headline)
-                    .foregroundStyle(.blue)
-                
                 Spacer()
-                
-                Menu {
-                    ForEach(PlanScope.allCases) { scope in
-                        Button(scope.rawValue) { planScope = scope }
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
+                Text(periodLabel())
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            
+            if trendPoints.isEmpty {
+                VStack {
+                    Image(systemName: "chart.bar.xaxis")
+                        .font(.system(size: 30))
+                        .foregroundStyle(.tertiary)
+                    Text("暂无阶段性趋势数据")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-            }
-            
-            ZStack(alignment: .topLeading) {
-                if planContent.isEmpty {
-                    Text("记录今天的计划...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary.opacity(0.5))
-                        .padding(.top, 8)
-                        .padding(.leading, 4)
-                        .allowsHitTesting(false)
+                .frame(maxWidth: .infinity)
+                .frame(height: 180)
+            } else {
+                let names = TrendCategoryNames()
+                let colors = TrendCategoryColors()
+                Chart(trendPoints) { pt in
+                    if period == .today {
+                        BarMark(
+                            x: .value("Time", pt.timeLabel),
+                            y: .value("Duration", pt.durationSecs)
+                        )
+                        .foregroundStyle(by: .value("Category", pt.category.name))
+                        .cornerRadius(4)
+                    } else {
+                        LineMark(
+                            x: .value("Time", pt.timeLabel),
+                            y: .value("Duration", pt.durationSecs)
+                        )
+                        .foregroundStyle(by: .value("Category", pt.category.name))
+                        .interpolationMethod(.monotone)
+                        .lineStyle(StrokeStyle(lineWidth: 2))
+                    }
                 }
-                TextEditor(text: $planContent)
-                    .font(.system(.body, design: .rounded))
-                    .scrollContentBackground(.hidden)
-                    .frame(height: 120)
-                    .padding(4)
-            }
-            .background(Color.primary.opacity(0.03))
-            .cornerRadius(10)
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.primary.opacity(0.05), lineWidth: 1)
-            )
-            
-            HStack {
-                if let status = planStatus {
-                    Text(status)
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.green)
-                }
-                
-                Spacer()
-                
-                Button("保存") {
-                    savePlan(scope: planScope, content: planContent, silent: false)
-                }
-                .buttonStyle(.plain)
-                .font(.caption.bold())
-                .foregroundStyle(.blue)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Color.blue.opacity(0.1))
-                .cornerRadius(6)
+                .chartForegroundStyleScale(domain: names, range: colors)
+                .chartLegend(.hidden)
+                .frame(height: 180)
+                .padding(.top, 10)
             }
         }
         .padding(16)
-        .background(Color.secondary.opacity(0.03))
+        .background(Color.secondary.opacity(0.04))
         .cornerRadius(16)
     }
-
-    private var heatmapSection: some View {
-        GroupBox("活动热力图") {
-            HeatmapView(days: heatmapDays)
-                .frame(height: 100)
+    
+    // Removed TrendChartConfiguration helper
+    
+    private func TrendCategoryNames() -> [String] {
+        Set(trendPoints.map { $0.category.name }).sorted()
+    }
+    
+    private func TrendCategoryColors() -> [Color] {
+        TrendCategoryNames().map { name in
+            trendPoints.first { $0.category.name == name }?.category.color ?? .blue
         }
     }
 
@@ -263,31 +324,54 @@ struct StatsView: View {
         .font(.caption)
     }
 
+    @ViewBuilder
+    private var statsCardsRow: some View {
+        HStack(alignment: .top, spacing: 20) {
+            topAppsSection
+                .frame(maxHeight: .infinity)
+            tagStatsSection
+                .frame(maxHeight: .infinity)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
     private var topAppsSection: some View {
-        GroupBox(label: Label("热门应用", systemImage: "app.badge")) {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("热门应用", systemImage: "app.badge")
+                .font(.headline)
+            
             if periodApps.isEmpty {
                 Text("暂无数据")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 20)
+                    .padding(.vertical, 40)
             } else {
                 VStack(spacing: 0) {
-                    ForEach(periodApps.prefix(8)) { app in
+                    ForEach(Array(periodApps.prefix(8).enumerated()), id: \.offset) { index, app in
                         HStack {
                             Text(app.appOrDomain)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
+                                .font(.system(size: 13, weight: .medium))
                             Spacer()
                             Text(formatDuration(app.totalSecs))
-                                .font(.caption.monospacedDigit())
+                                .font(.system(size: 12, design: .monospaced))
                                 .foregroundStyle(.secondary)
                         }
-                        .padding(.vertical, 4)
-                        Divider()
+                        .padding(.vertical, 8)
+                        
+                        if index < min(periodApps.count, 8) - 1 {
+                            Divider().opacity(0.5)
+                        }
                     }
                 }
             }
         }
+        .padding(16)
+        .background(Color.secondary.opacity(0.04))
+        .cornerRadius(16)
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 380, alignment: .top)
     }
 
     private var tagStatsSection: some View {
@@ -311,31 +395,72 @@ struct StatsView: View {
                     )
                     .foregroundStyle(item.color)
                     .cornerRadius(4)
+                    .opacity(hoveredTag(in: stats)?.id == item.id ? 1.0 : (hoveredAngle == nil ? 1.0 : 0.6))
                 }
-                .frame(height: 180)
+                .chartAngleSelection(value: $hoveredAngle)
+                .frame(height: 140)
                 .padding(.vertical, 8)
                 
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(stats.prefix(4)) { item in
+                if let selected = hoveredTag(in: stats) {
+                    VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Circle().fill(item.color).frame(width: 8, height: 8)
-                            Text(item.name).font(.caption2)
+                            Circle().fill(selected.color).frame(width: 8, height: 8)
+                            Text(selected.name).font(.system(size: 14, weight: .bold))
                             Spacer()
-                            Text(formatDuration(item.totalSecs))
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.secondary)
+                            Text(formatDuration(selected.totalSecs))
+                                .font(.system(size: 14, design: .monospaced))
+                                .foregroundStyle(.primary)
                         }
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 10)
+                        .background(selected.color.opacity(0.1))
+                        .cornerRadius(8)
                     }
+                    .transition(.opacity)
+                } else if isHoveringTagChart {
+                    // Default view: Total
+                    let total = stats.reduce(0) { $0 + $1.totalSecs }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("总专注时长")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(formatDuration(total))
+                            .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    }
+                    .transition(.opacity)
                 }
             }
+        }
         }
         .padding(16)
         .background(Color.secondary.opacity(0.04))
         .cornerRadius(16)
+        .frame(width: 320)
+        .frame(minHeight: 380, alignment: .top)
+        .onHover { over in
+            withAnimation(.spring()) {
+                isHoveringTagChart = over
+                if !over { hoveredAngle = nil }
+            }
+        }
+    }
+
+    private func hoveredTag(in stats: [TagStat]) -> TagStat? {
+        guard let angle = hoveredAngle else { return nil }
+        var current: Double = 0
+        for s in stats {
+            current += s.totalSecs
+            if angle <= current { return s }
+        }
+        return nil
     }
 
     private func tagStats() -> [TagStat] {
         var dict: [String: Double] = [:]
+        let sessions: [WorkSession] = historyItems.compactMap {
+            if case .session(let s) = $0 { return s }
+            return nil
+        }
         for s in sessions {
             let catId = s.categoryId ?? "none"
             dict[catId, default: 0] += Double(s.durationSecs)
@@ -418,7 +543,7 @@ struct StatsView: View {
     }
 
     private var historySection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Label("活动历史", systemImage: "clock.arrow.circlepath")
                     .font(.headline)
@@ -442,72 +567,108 @@ struct StatsView: View {
                 .foregroundStyle(Color.accentColor)
             }
             
-            let grouped = groupedSessions
-            let sortedDates = grouped.keys.sorted(by: {
-                historySortOrder == .newestFirst ? ($0 > $1) : ($0 < $1)
-            })
-            
-            if sessions.isEmpty {
+            if historyItems.isEmpty {
                 Text("所选时段内无记录")
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 20)
             } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(sortedDates, id: \.self) { date in
-                        let isExpanded = expandedDays.contains(date)
-                        
-                        VStack(alignment: .leading, spacing: 0) {
-                            Button {
-                                withAnimation {
-                                    toggleDayExpanded(date)
-                                }
-                            } label: {
-                                HStack {
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 10, weight: .bold))
-                                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                                        .foregroundStyle(.secondary)
-                                    
-                                    Text(formatDateHeader(date))
-                                        .font(.caption2.bold())
-                                        .foregroundStyle(.secondary)
-                                    
-                                    Spacer()
-                                    
-                                    if !isExpanded {
-                                        let count = groupedSessions[date]?.count ?? 0
-                                        Text("\(count) 条记录")
-                                            .font(.system(size: 8))
-                                            .foregroundStyle(.tertiary)
-                                    }
-                                }
-                                .padding(.vertical, 8)
-                                .padding(.horizontal, 4)
-                                .background(Color.secondary.opacity(0.05))
-                                .cornerRadius(6)
+                let sortedItems = historyItems.sorted(by: {
+                    historySortOrder == .newestFirst ? ($0.timestamp > $1.timestamp) : ($0.timestamp < $1.timestamp)
+                })
+                let grouped = Dictionary(grouping: sortedItems) { item in
+                    let date = Date(timeIntervalSince1970: Double(item.timestamp) / 1000)
+                    return Self.dateFormatter.string(from: date)
+                }
+                let sortedDates = grouped.keys.sorted(by: historySortOrder == .newestFirst ? (>) : (<))
+                
+                ForEach(sortedDates, id: \.self) { date in
+                    let isExpanded = expandedDays.contains(date)
+                    
+                    VStack(alignment: .leading, spacing: 0) {
+                        Button {
+                            withAnimation {
+                                toggleDayExpanded(date)
                             }
-                            .buttonStyle(.plain)
-                            
-                            if isExpanded {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    let daySessions = groupedSessions[date] ?? []
-                                    let sortedSessions = daySessions.sorted(by: {
-                                        historySortOrder == .newestFirst ? ($0.startTs > $1.startTs) : ($0.startTs < $1.startTs)
-                                    })
-                                    
-                                    ForEach(sortedSessions) { session in
-                                        sessionRow(session)
-                                    }
+                        } label: {
+                            HStack {
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                                    .foregroundStyle(.secondary)
+                                
+                                Text(formatDateHeader(date))
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(.secondary)
+                                
+                                Spacer()
+                                
+                                if !isExpanded {
+                                    Text("\(grouped[date]?.count ?? 0) 项")
+                                        .font(.system(size: 8))
+                                        .foregroundStyle(.tertiary)
                                 }
-                                .padding(.top, 10)
-                                .padding(.leading, 12)
-                                .transition(.opacity.combined(with: .move(edge: .top)))
                             }
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 4)
+                            .background(Color.secondary.opacity(0.05))
+                            .cornerRadius(6)
                         }
-                        .padding(.bottom, 5)
+                        .buttonStyle(.plain)
+                        
+                        if isExpanded {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(grouped[date] ?? []) { item in
+                                    switch item {
+                                    case .session(let s):
+                                        sessionRow(s)
+                                    case .summary(let sum):
+                                        SummaryHistoryRow(summary: sum)
+                                    }
+                                }
+                            }
+                            .padding(.top, 10)
+                            .padding(.leading, 12)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
                     }
+                    .padding(.bottom, 5)
                 }
             }
+        }
+    }
+    
+    struct SummaryHistoryRow: View {
+        let summary: DailySummary
+        var body: some View {
+            HStack(spacing: 12) {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(.purple)
+                    .font(.system(size: 14))
+                    .frame(width: 32, height: 32)
+                    .background(Color.purple.opacity(0.1))
+                    .clipShape(Circle())
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("AI 深度复盘报告")
+                        .font(.system(size: 13, weight: .medium))
+                    Text(summary.keywords)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                
+                Spacer()
+                
+                HStack(spacing: 4) {
+                    Image(systemName: "star.fill")
+                        .foregroundStyle(.orange)
+                    Text("\(summary.score)")
+                }
+                .font(.system(size: 10, weight: .bold))
+            }
+            .padding(12)
+            .background(Color.purple.opacity(0.04))
+            .cornerRadius(10)
         }
     }
     
@@ -516,15 +677,6 @@ struct StatsView: View {
             expandedDays.remove(date)
         } else {
             expandedDays.insert(date)
-        }
-    }
-    
-    private var groupedSessions: [String: [WorkSession]] {
-        Dictionary(grouping: sessions) { session in
-            let date = Date(timeIntervalSince1970: Double(session.startTs) / 1000)
-            let f = DateFormatter()
-            f.dateFormat = "yyyy-MM-dd"
-            return f.string(from: date)
         }
     }
     
@@ -695,13 +847,20 @@ struct StatsView: View {
             let apps = (try? EventStore().topApps(startMs: startMs, endMs: endMs, limit: 15)) ?? []
             // Sessions
             let sessions = (try? WorkSessionStore().sessions(from: startMs, to: endMs)) ?? []
+            // Summaries for the range
+            let summaries = (try? WorkSessionStore().summaries(from: startMs, to: endMs)) ?? []
 
             DispatchQueue.main.async {
                 self.periodApps = apps
-                self.sessions = sessions
+                
+                // Unified history
+                var items: [LogItem] = sessions.map { .session($0) }
+                items += summaries.map { .summary($0) }
+                self.historyItems = items
+                
+                self.computeTrendPoints(sessions: sessions)
                 
                 // Auto-fold logic: if spanning > 1 day, start collapsed
-                let cal = Calendar.current
                 let isMultiDay = self.period != .today
                 if isMultiDay {
                     self.expandedDays = []
@@ -714,9 +873,9 @@ struct StatsView: View {
     }
 
     private func loadSummary() {
-        let date = Self.dateFormatter.string(from: Date())
+        let key = periodKey()
         DispatchQueue.global(qos: .userInitiated).async {
-            let s = try? WorkSessionStore().summary(for: date)
+            let s = try? WorkSessionStore().summary(for: key)
             DispatchQueue.main.async { self.summary = s }
         }
     }
@@ -791,11 +950,19 @@ struct StatsView: View {
         return f.string(from: Date())
     }
 
-    private func loadPlan(scope: PlanScope) {
-        let key = planKey(for: scope)
-        DispatchQueue.global(qos: .userInitiated).async {
-            let content = AppDatabase.shared.setting(for: key) ?? ""
-            DispatchQueue.main.async { self.planContent = content }
+    private func loadAllPlans() {
+        for scope in PlanScope.allCases {
+            let key = planKey(for: scope)
+            DispatchQueue.global(qos: .userInitiated).async {
+                let content = AppDatabase.shared.setting(for: key) ?? ""
+                DispatchQueue.main.async {
+                    switch scope {
+                    case .daily: self.dailyPlan = content
+                    case .monthly: self.monthlyPlan = content
+                    case .yearly: self.yearlyPlan = content
+                    }
+                }
+            }
         }
     }
 
@@ -836,10 +1003,52 @@ struct StatsView: View {
         }
     }
 
+    private func computeTrendPoints(sessions: [WorkSession]) {
+        let cal = Calendar.current
+        var dict: [String: [String: Double]] = [:] // timeLabel -> [categoryId -> totalSecs]
+        
+        for s in sessions {
+            let start = Date(timeIntervalSince1970: Double(s.startTs) / 1000)
+            let catId = s.categoryId ?? "none"
+            let label: String
+            
+            if period == .today {
+                // Hourly: "09:00", "10:00"
+                let hour = cal.component(.hour, from: start)
+                label = String(format: "%02d:00", hour)
+            } else {
+                // Daily: "04-15", "04-16"
+                let f = DateFormatter(); f.dateFormat = "MM-dd"
+                label = f.string(from: start)
+            }
+            
+            if dict[label] == nil { dict[label] = [:] }
+            dict[label]?[catId, default: 0] += s.durationSecs
+        }
+        
+        let sortedLabels = dict.keys.sorted()
+        var pts: [TrendPoint] = []
+        for label in sortedLabels {
+            if let catDict = dict[label] {
+                for (catId, secs) in catDict {
+                    let cat = SessionCategory.find(catId)
+                    pts.append(TrendPoint(timeLabel: label, category: cat, durationSecs: secs))
+                }
+            }
+        }
+        self.trendPoints = pts
+    }
+
     private func periodKey() -> String {
-        let (startMs, _) = periodRange()
-        let startDate = Date(timeIntervalSince1970: Double(startMs) / 1000)
-        return Self.dateFormatter.string(from: startDate)
+        let (startMs, endMs) = periodRange()
+        let start = Date(timeIntervalSince1970: Double(startMs) / 1000)
+        let end = Date(timeIntervalSince1970: Double(endMs) / 1000)
+        
+        if period == .today {
+            return Self.dateFormatter.string(from: start)
+        } else {
+            return "\(Self.dateFormatter.string(from: start))..\(Self.dateFormatter.string(from: end))"
+        }
     }
 
     private func periodLabel() -> String {

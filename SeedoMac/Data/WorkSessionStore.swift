@@ -60,6 +60,23 @@ final class WorkSessionStore {
             try DailySummary.order(Column("date").desc).fetchAll(d)
         }
     }
+    
+    /// Fetches summaries for days that have sessions in the given timeframe.
+    func summaries(from startMs: Int64, to endMs: Int64) throws -> [DailySummary] {
+        try db.read { d in
+            // Map timestamps to YYYY-MM-DD to match DailySummary keys
+            let dates = try Row.fetchAll(d, sql: """
+                SELECT DISTINCT strftime('%Y-%m-%d', start_ts / 1000, 'unixepoch', 'localtime') AS day
+                FROM work_sessions
+                WHERE start_ts >= ? AND start_ts < ?
+            """, arguments: [startMs, endMs]).map { $0["day"] as String }
+            
+            return try DailySummary
+                .filter(dates.contains(Column("date")))
+                .order(Column("date").asc)
+                .fetchAll(d)
+        }
+    }
 
     // MARK: - Unified Logs
 

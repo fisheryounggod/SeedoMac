@@ -3,6 +3,13 @@ import AppKit
 import SwiftUI
 import KeyboardShortcuts
 
+
+// Support keyboard input in borderless windows
+class KeyWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
@@ -323,7 +330,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "今日AI总结", action: #selector(todayAISummary), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "纯专注模式", action: #selector(enterDeepFocus), keyEquivalent: "d"))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "退出", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        
+        let quitItem = NSMenuItem(title: "退出", action: #selector(quitApp), keyEquivalent: "q")
+        menu.addItem(quitItem)
+        
+        // Final strict icon removal pass
+        for item in menu.items {
+            item.image = nil
+        }
         
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
@@ -347,8 +361,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func todayAISummary() {
-        openDashboard(tab: .stats)
         NotificationCenter.default.post(name: .shouldRunAISummary, object: nil)
+    }
+
+    @objc private func quitApp() {
+        NSApplication.shared.terminate(nil)
     }
 
     private func openDashboard(tab: DashboardTab) {
@@ -365,12 +382,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func enterDeepFocus() {
         if deepFocusWindowController == nil {
-            let view = DeepFocusView(onClose: { [weak self] in
+            let view = DeepFocusView(appState: appState, onClose: { [weak self] in
                 self?.deepFocusWindowController?.close()
                 self?.deepFocusWindowController = nil
             })
             let controller = NSHostingController(rootView: view)
-            let window = NSWindow(contentViewController: controller)
+            let window = KeyWindow(contentViewController: controller)
             window.styleMask = [.borderless, .fullSizeContentView]
             window.level = .mainMenu + 1 // High level
             window.isOpaque = false
@@ -381,6 +398,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         deepFocusWindowController?.window?.setFrame(NSScreen.main?.frame ?? .zero, display: true)
         deepFocusWindowController?.showWindow(nil)
+        deepFocusWindowController?.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
