@@ -6,6 +6,8 @@ enum StatsPeriod: String, CaseIterable, Identifiable {
     case today  = "Today"
     case week   = "Week"
     case month  = "Month"
+    case quarter = "Quarter"
+    case halfYear = "Half"
     case year   = "Year"
     case custom = "Custom"
 
@@ -315,11 +317,14 @@ struct StatsView: View {
     // Removed TrendChartConfiguration helper
     
     private func TrendCategoryNames() -> [String] {
-        Set(trendPoints.map { $0.category.name }).sorted()
+        // Show all categories that have at least one trend point
+        let names = Set(trendPoints.map { $0.category.name }).sorted()
+        return names
     }
     
     private func TrendCategoryColors() -> [Color] {
-        TrendCategoryNames().map { name in
+        let names = TrendCategoryNames()
+        return names.map { name in
             trendPoints.first { $0.category.name == name }?.category.color ?? .blue
         }
     }
@@ -331,7 +336,7 @@ struct StatsView: View {
             }
         }
         .pickerStyle(.segmented)
-        .frame(maxWidth: 400)
+        .frame(maxWidth: .infinity)
     }
 
     private var customRangePicker: some View {
@@ -827,6 +832,12 @@ struct StatsView: View {
                     Label("编辑", systemImage: "pencil")
                 }
                 
+                Button {
+                    duplicateSession(session)
+                } label: {
+                    Label("复制", systemImage: "doc.on.doc")
+                }
+                
                 Button(role: .destructive) {
                     sessionToDelete = session
                 } label: {
@@ -878,6 +889,27 @@ struct StatsView: View {
                 }
             } catch {
                 print("[StatsView] Update failed: \(error)")
+            }
+        }
+    }
+
+    private func duplicateSession(_ session: WorkSession) {
+        var copy = session
+        copy.id = nil
+        // Original startTs and endTs are preserved as requested.
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try WorkSessionStore().insert(&copy)
+                DispatchQueue.main.async {
+                    loadData()
+                    // Delay slightly to ensure sheet animation doesn't glitch if loadData takes time
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        self.editingSession = copy
+                    }
+                }
+            } catch {
+                print("[StatsView] Duplicate failed: \(error)")
             }
         }
     }
@@ -1049,6 +1081,12 @@ struct StatsView: View {
         case .month:
             let start = cal.date(byAdding: .month, value: -1, to: now)!
             return (Int64(start.timeIntervalSince1970 * 1000), endMs)
+        case .quarter:
+            let start = cal.date(byAdding: .month, value: -3, to: now)!
+            return (Int64(start.timeIntervalSince1970 * 1000), endMs)
+        case .halfYear:
+            let start = cal.date(byAdding: .month, value: -6, to: now)!
+            return (Int64(start.timeIntervalSince1970 * 1000), endMs)
         case .year:
             let start = cal.date(byAdding: .year, value: -1, to: now)!
             return (Int64(start.timeIntervalSince1970 * 1000), endMs)
@@ -1112,6 +1150,8 @@ struct StatsView: View {
         case .today: return "Today"
         case .week: return "Past 7 days"
         case .month: return "Past month"
+        case .quarter: return "Past quarter"
+        case .halfYear: return "Past 6 months"
         case .year: return "Past year"
         case .custom: return "\(Self.dateFormatter.string(from: customStart)) — \(Self.dateFormatter.string(from: customEnd))"
         }

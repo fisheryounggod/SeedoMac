@@ -275,21 +275,92 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshTodayStats() {
         let store = EventStore()
+        let sessionStore = WorkSessionStore()
+        
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
+            
+            // 1. App usage stats (Today)
             let includedApps = (try? store.todayStats()) ?? []
-            let total = includedApps.reduce(0.0) { $0 + $1.totalSecs }
+            
+            // 2. Focused sessions sum (Today)
+            let cal = Calendar.current
+            let startOfDay = cal.startOfDay(for: Date())
+            let startMs = Int64(startOfDay.timeIntervalSince1970 * 1000)
+            let endMs = Int64(Date().timeIntervalSince1970 * 1000)
+            
+            let sessions = (try? sessionStore.fetchSessions(startMs: startMs, endMs: endMs)) ?? []
+            let focusSecs = sessions.filter { s in
+                let cat = SessionCategory.find(s.categoryId)
+                return cat.name.contains("专注")
+            }.reduce(0.0) { $0 + $1.durationSecs }
 
             DispatchQueue.main.async {
-                self.appState.todayTotalSecs = total
+                self.appState.todayTotalSecs = focusSecs
                 self.appState.todayTopApps = Array(includedApps.prefix(10))
-
-                // Update menu bar title
-                let hrs  = Int(total) / 3600
-                let mins = (Int(total) % 3600) / 60
-                self.statusItem.button?.title = hrs > 0 ? "🌱\(hrs)h\(mins)m" : "🌱\(mins)m"
+                self.updateMenuBarIcon()
             }
         }
+    }
+
+    private func updateMenuBarIcon() {
+        let scheduler = BreakScheduler.shared
+        let elapsed = Int(scheduler.workElapsedSecsDetailed)
+        let total = Int(scheduler.workIntervalSecs)
+        let remainingMins = max(0, (total - elapsed) / 60)
+        let progress = min(1.0, Double(elapsed) / Double(total))
+        
+        if let button = statusItem.button {
+            button.image = generateProgressImage(progress: progress, text: "\(remainingMins)")
+            button.imagePosition = .imageOnly
+        }
+    }
+
+    private func generateProgressImage(progress: Double, text: String) -> NSImage {
+        let size = NSSize(width: 22, height: 22)
+        let image = NSImage(size: size)
+        
+        image.lockFocus()
+        let rect = NSRect(origin: .zero, size: size).insetBy(dx: 2, dy: 2)
+        
+        // Background circle
+        let bgPath = NSBezierPath(ovalIn: rect)
+        NSColor.secondaryLabelColor.withAlphaComponent(0.2).setStroke()
+        bgPath.lineWidth = 1.6
+        bgPath.stroke()
+        
+        // Progress arc
+        let startAngle: CGFloat = 90
+        let endAngle: CGFloat = 90 - CGFloat(progress * 360)
+        let arcPath = NSBezierPath()
+        let center = NSPoint(x: size.width/2, y: size.height/2)
+        let radius = rect.width / 2
+        
+        arcPath.appendArc(withCenter: center, radius: radius, startAngle: startAngle, endAngle: endAngle, clockwise: true)
+        NSColor.systemGreen.setStroke()
+        arcPath.lineWidth = 2.0
+        arcPath.lineCapStyle = .round
+        arcPath.stroke()
+        
+        // Text
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 8, weight: .bold)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.labelColor
+        ]
+        
+        let textSize = text.size(withAttributes: attributes)
+        let textRect = NSRect(
+            x: (size.width - textSize.width) / 2,
+            y: (size.height - textSize.height) / 2,
+            width: textSize.width,
+            height: textSize.height
+        )
+        text.draw(in: textRect, withAttributes: attributes)
+        
+        image.unlockFocus()
+        image.isTemplate = false // Use system colors directly
+        return image
     }
 
     private func checkAccessibilityPermission() {
