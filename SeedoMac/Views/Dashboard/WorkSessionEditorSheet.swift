@@ -82,8 +82,6 @@ struct WorkSessionEditorSheet: View {
                 Spacer()
                 Button("取消") { onCancel() }
                 Button("保存") {
-                    // Update duration based on final start/end times before saving
-                    session.durationSecs = Double(session.endTs - session.startTs) / 1000.0
                     onSave(session)
                 }
                     .buttonStyle(.borderedProminent)

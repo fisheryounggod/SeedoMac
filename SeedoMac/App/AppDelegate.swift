@@ -289,7 +289,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let startMs = Int64(startOfDay.timeIntervalSince1970 * 1000)
             let endMs = Int64(Date().timeIntervalSince1970 * 1000)
             
-            let sessions = (try? sessionStore.fetchSessions(startMs: startMs, endMs: endMs)) ?? []
+            let sessions = (try? sessionStore.sessions(from: startMs, to: endMs)) ?? []
             let focusSecs = sessions.filter { s in
                 let cat = SessionCategory.find(s.categoryId)
                 return cat.name.contains("专注")
@@ -336,7 +336,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let center = NSPoint(x: size.width/2, y: size.height/2)
         let radius = rect.width / 2
         
-        arcPath.appendArc(withCenter: center, radius: radius, startAngle: startAngle, endAngle: endAngle, clockwise: true)
+        // Note: NSBezierPath.appendArc uses degrees and draws counter-clockwise.
+        // To draw a clockwise "sweep" for progress, we draw from endAngle to startAngle.
+        arcPath.appendArc(withCenter: center, radius: radius, startAngle: endAngle, endAngle: startAngle)
         NSColor.systemGreen.setStroke()
         arcPath.lineWidth = 2.0
         arcPath.lineCapStyle = .round

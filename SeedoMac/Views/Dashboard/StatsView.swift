@@ -523,6 +523,10 @@ struct StatsView: View {
             return 7 * 86400
         case .month:
             return 30 * 86400
+        case .quarter:
+            return 90 * 86400
+        case .halfYear:
+            return 180 * 86400
         case .year:
             return 365 * 86400
         case .custom:
@@ -1110,9 +1114,13 @@ struct StatsView: View {
                 // Hourly: "09:00", "10:00"
                 let hour = cal.component(.hour, from: start)
                 label = String(format: "%02d:00", hour)
-            } else {
-                // Daily: "04-15", "04-16"
+            } else if period == .week || period == .month {
+                // Daily: "04-15"
                 let f = DateFormatter(); f.dateFormat = "MM-dd"
+                label = f.string(from: start)
+            } else {
+                // Monthly for longer periods: "2024-04"
+                let f = DateFormatter(); f.dateFormat = "yyyy-MM"
                 label = f.string(from: start)
             }
             
