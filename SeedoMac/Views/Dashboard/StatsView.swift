@@ -130,10 +130,17 @@ struct StatsView: View {
                 monthlyPlan: $monthlyPlan,
                 yearlyPlan: $yearlyPlan,
                 onSave: { d, m, y in
+                    // 1. Update database
                     savePlan(scope: .daily, content: d, silent: false)
                     savePlan(scope: .monthly, content: m, silent: false)
                     savePlan(scope: .yearly, content: y, silent: false)
-                    isEditingPlans = false
+                    
+                    // 2. Sync to local state so UI updates immediately
+                    self.dailyPlan = d
+                    self.monthlyPlan = m
+                    self.yearlyPlan = y
+                    
+                    self.isEditingPlans = false
                 },
                 onCancel: { isEditingPlans = false }
             )
