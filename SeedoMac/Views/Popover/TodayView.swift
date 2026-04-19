@@ -4,7 +4,7 @@ import SwiftUI
 struct TodayView: View {
     @ObservedObject var appState: AppState
     @ObservedObject var breakScheduler = BreakScheduler.shared
-    let openDashboard: () -> Void
+    let openDashboard: (DashboardTab) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -139,30 +139,71 @@ struct TodayView: View {
 
     private var footer: some View {
         HStack(spacing: 12) {
-            Button(action: { appState.isTracking.toggle() }) {
-                Image(systemName: appState.isTracking ? "pause.fill" : "play.fill")
-                    .font(.system(size: 12))
-                    .frame(width: 32, height: 32)
-                    .background(Color.primary.opacity(0.05))
-                    .clipShape(Circle())
+            // Pause/Play Button (Matching Rounded Square style in screenshot)
+            HStack(spacing: 8) {
+                Button(action: { appState.isTracking.toggle() }) {
+                    Image(systemName: appState.isTracking ? "pause.fill" : "play.fill")
+                        .font(.system(size: 14))
+                        .frame(width: 44, height: 44)
+                        .background(Color.primary.opacity(0.08))
+                        .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+                
+                if appState.isTracking {
+                    Button(action: {
+                        let duration = appState.currentDurationSecs
+                        appState.isTracking = false
+                        if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+                            appDelegate.resetTracking()
+                        }
+                        openDashboard(.stats)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            NotificationCenter.default.post(name: .shouldShowAddActivity, object: duration)
+                        }
+                    }) {
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 14))
+                            .frame(width: 44, height: 44)
+                            .background(Color.primary.opacity(0.08))
+                            .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
+                    .help("记录并重置计时")
+                }
             }
-            .buttonStyle(.plain)
 
             Spacer()
 
-            Button(action: { openDashboard() }) {
-                Text("详细统计")
-                    .font(.system(size: 11, weight: .medium))
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color.accentColor)
-                    .foregroundStyle(.white)
-                    .cornerRadius(100)
+            // Action Buttons
+            HStack(spacing: 12) {
+                // Stats Button
+                Button(action: { openDashboard(.stats) }) {
+                    Text("统计")
+                        .font(.system(size: 13, weight: .semibold))
+                        .padding(.horizontal, 16)
+                        .frame(height: 44)
+                        .background(Color.primary.opacity(0.08))
+                        .foregroundStyle(.primary)
+                        .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+                
+                // Settings Button
+                Button(action: { openDashboard(.settings) }) {
+                    Text("设置")
+                        .font(.system(size: 13, weight: .semibold))
+                        .padding(.horizontal, 16)
+                        .frame(height: 44)
+                        .background(Color.primary.opacity(0.08))
+                        .foregroundStyle(.primary)
+                        .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.vertical, 14)
     }
 }
 

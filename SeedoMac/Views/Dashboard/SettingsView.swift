@@ -15,6 +15,7 @@ struct SettingsView: View {
     @State private var apiKeyMasked = true
     @State private var obsidianVaultPath: String = ""
     @State private var obsidianAutoImport: Bool = false
+    @State private var obsidianImportRegex: String = ""
     @State private var obsidianImportStatus: String? = nil
     @State private var autoSummaryEnabled: Bool = false
     @State private var autoSummaryTime: Date = SettingsView.defaultAutoSummaryTime()
@@ -28,6 +29,7 @@ struct SettingsView: View {
     @State private var breakBackgroundImagePath: String = ""
     @State private var calendarSyncEnabled: Bool = false
     @State private var categories: [SessionCategory] = []
+    @State private var topAppsLimit: Int = 10
     @State private var saveStatus: String? = nil
 
     private let providers: [(String, String, String)] = [
@@ -39,312 +41,267 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("应用") {
-                Toggle("Launch at Login", isOn: $autostartEnabled)
-                    .onChange(of: autostartEnabled) { newVal in
-                        toggleAutostart(newVal)
-                    }
-
-                if !appState.hasAccessibilityPermission {
-                    HStack {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.yellow)
-                        Text("Accessibility permission required for window titles")
-                            .font(.caption)
-                        Button("Grant") { WindowInfoProvider.requestPermission() }
-                            .buttonStyle(.borderless)
-                    }
-                }
-            }
-
-            Section("AI 配置") {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Provider").font(.caption).foregroundStyle(.secondary)
-                        Picker("", selection: $provider) {
-                            ForEach(providers, id: \.0) { p in Text(p.1).tag(p.0) }
-                        }
-                        .labelsHidden()
-                        .frame(width: 120)
-                    }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Model").font(.caption).foregroundStyle(.secondary)
-                        TextField("", text: $model)
-                            .textFieldStyle(.roundedBorder)
-                    }
-                }
-                .onChange(of: provider) { newProvider in
-                    if let preset = providers.first(where: { $0.0 == newProvider }), !preset.2.isEmpty {
-                        baseURL = preset.2
-                    }
-                }
-
-                if provider == "custom" {
-                    TextField("Base URL", text: $baseURL)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.caption)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("API Key").font(.caption).foregroundStyle(.secondary)
-                    HStack {
-                        if apiKeyMasked {
-                            SecureField("", text: $apiKey)
-                                .textFieldStyle(.roundedBorder)
-                        } else {
-                            TextField("", text: $apiKey)
-                                .textFieldStyle(.roundedBorder)
-                        }
-                        Button(apiKeyMasked ? "Show" : "Hide") { apiKeyMasked.toggle() }
-                            .buttonStyle(.borderless)
-                            .controlSize(.small)
-                    }
-                }
-
-                HStack {
-                    Toggle("每日自动生成今日 AI 总结", isOn: $autoSummaryEnabled)
-                        .font(.subheadline)
-                    if autoSummaryEnabled {
-                        Spacer()
-                        DatePicker("",
-                                   selection: $autoSummaryTime,
-                                   displayedComponents: [.hourAndMinute])
-                            .datePickerStyle(.compact)
-                            .labelsHidden()
-                            .controlSize(.small)
-                    }
-                }
-            }
-
-            Section("基本休息设置") {
+            // 1. Core Focus Settings
+            Section("通用设置") {
+                Toggle("开机自启", isOn: $autostartEnabled)
+                    .onChange(of: autostartEnabled) { toggleAutostart($0) }
+                
                 Toggle("今日启用休息提醒", isOn: $breakEnabledToday)
                     .onChange(of: breakEnabledToday) { _ in
                         saveSettings()
-                        BreakScheduler.shared.refreshConfig()
                     }
 
                 HStack {
-                    Text("开始专注间隔")
+                    Text("专注间隔 / 分")
                     Spacer()
                     TextField("", value: $breakWorkInterval, format: .number)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 50)
-                    Text("分钟")
                     Stepper("", value: $breakWorkInterval, in: 5...240, step: 5)
                 }
 
                 HStack {
-                    Text("短休息时长")
+                    Text("短休息时长 / 分")
                     Spacer()
                     TextField("", value: $breakDuration, format: .number)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 50)
-                    Text("分钟")
                     Stepper("", value: $breakDuration, in: 1...60, step: 1)
                 }
-            }
-
-            Section("循环休息 (Pomodoro)") {
-                Toggle("启用长休息", isOn: $breakLongEnabled)
-                    .font(.subheadline)
-
-                HStack {
-                    Text("长休息频率")
-                    Spacer()
-                    Text("每完成")
-                    TextField("", value: $breakLongFrequency, format: .number)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 40)
-                    Text("次专注后")
-                    Stepper("", value: $breakLongFrequency, in: 1...10, step: 1)
-                }
-                .font(.subheadline)
-                .opacity(breakLongEnabled ? 1.0 : 0.5)
-                .disabled(!breakLongEnabled)
-
-                HStack {
-                    Text("长休息时长")
-                    Spacer()
-                    TextField("", value: $breakLongDuration, format: .number)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 50)
-                    Text("分钟")
-                    Stepper("", value: $breakLongDuration, in: 5...60, step: 1)
-                }
-                .disabled(!breakLongEnabled)
-                .opacity(breakLongEnabled ? 1.0 : 0.5)
-            }
-
-            Section("外观与个性化") {
-                HStack {
-                    Text("背景颜色")
-                    Spacer()
-                    ColorPicker("", selection: $breakBackgroundColor)
-                }
-
-                HStack {
-                    Text("背景图片")
-                    Spacer()
-                    if !breakBackgroundImagePath.isEmpty {
-                        Text(URL(fileURLWithPath: breakBackgroundImagePath).lastPathComponent)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .frame(maxWidth: 150, alignment: .trailing)
-                        
-                        Button("清除") {
-                            clearBackgroundImage()
-                        }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(.red)
-                    }
-                    
-                    Button(breakBackgroundImagePath.isEmpty ? "选择图片" : "更换") {
-                        selectBackgroundImage()
-                    }
-                    .buttonStyle(.bordered)
-                }
-
-                HStack {
-                    Button("立即测试覆盖层") {
-                        triggerTestBreak()
-                    }
-                    .buttonStyle(.bordered)
-                    
-                    Spacer()
-                    
-                    HStack {
-                        let elapsed = BreakScheduler.shared.workElapsedSecs / 60
-                        let total = BreakScheduler.shared.sessionsSinceLongBreak
-                        Text("当前专注: \(elapsed)m | 已完成 \(total)/\(breakLongFrequency)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            
-            Section("同步与集成") {
-                Toggle("同步专注记录到日历", isOn: $calendarSyncEnabled)
-                    .onChange(of: calendarSyncEnabled) { enabled in
-                        if enabled {
-                            CalendarSyncService.shared.requestAccess { granted in
-                                if !granted {
-                                    DispatchQueue.main.async {
-                                        self.calendarSyncEnabled = false
-                                    }
-                                }
-                            }
-                        }
-                    }
-            }
-
-            Section("数据追踪") {
-                VStack(alignment: .leading) {
-                    Text("AFK Threshold: \(Int(afkMinutes)) minutes")
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("离席判定阈值: \(Int(afkMinutes)) 分钟").font(.caption)
                     Slider(value: $afkMinutes, in: 5...60, step: 1)
                 }
 
-                Toggle("Redact Window Titles (Privacy)", isOn: $appState.isRedactTitles)
-            }
-
-            Section("Obsidian 日记导入") {
-                HStack {
-                    TextField("Vault 路径", text: $obsidianVaultPath)
-                        .textFieldStyle(.roundedBorder)
-                        .disabled(true)
-                    Button("选择…") { pickObsidianVault() }
-                }
-                Text("路径: {vault}/sources/diarys/{yyyyMMdd}.md")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Toggle("自动导入今日日记", isOn: $obsidianAutoImport)
-
-                HStack {
-                    Button("立即导入今天") { importObsidianNow() }
-                        .disabled(obsidianVaultPath.isEmpty)
-                    if let status = obsidianImportStatus {
-                        Text(status)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            Section("标签与分类管理") {
-                ForEach($categories) { $cat in
-                    HStack {
-                        ColorPicker("", selection: Binding(
-                            get: { cat.color },
-                            set: { newVal in
-                                var updated = cat
-                                updated.id = cat.id // maintain ID
-                                // Need to convert Color to Hex
-                                let hex = colorToHex(newVal)
-                                // We can't directly update private colorHex easily here without a helper
-                                updateCategoryColor(id: cat.id, newHex: hex)
-                            }
-                        ))
-                        .labelsHidden()
-                        .frame(width: 40)
+                DisclosureGroup("高级循环设置 (Pomodoro)") {
+                    VStack(spacing: 12) {
+                        Toggle("启用长休息", isOn: $breakLongEnabled)
                         
-                        TextField("名称", text: $cat.name)
-                            .textFieldStyle(.plain)
-                            .onSubmit { saveCategory(cat) }
-                        
-                        Spacer()
-                        
-                        Button(role: .destructive) {
-                            deleteCategory(cat)
-                        } label: {
-                            Image(systemName: "trash")
-                                .foregroundStyle(.red)
+                        HStack {
+                            Text("长休息频率")
+                            Spacer()
+                            Text("每完成")
+                            TextField("", value: $breakLongFrequency, format: .number)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 40)
+                            Text("次专注后")
+                            Stepper("", value: $breakLongFrequency, in: 1...10, step: 1)
                         }
-                        .buttonStyle(.plain)
+                        .disabled(!breakLongEnabled)
+                        
+                        HStack {
+                            Text("长休息时长")
+                            Spacer()
+                            TextField("", value: $breakLongDuration, format: .number)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 50)
+                            Text("分钟")
+                            Stepper("", value: $breakLongDuration, in: 5...60, step: 1)
+                        }
+                        .disabled(!breakLongEnabled)
+                    }
+                    .padding(.vertical, 8)
+                }
+                
+                if !appState.hasAccessibilityPermission {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+                        Text("需授予辅助功能权限以获取窗口标题").font(.caption2)
+                        Button("去授权") { WindowInfoProvider.requestPermission() }
+                            .buttonStyle(.borderless)
                     }
                 }
-                .onMove { from, to in
-                    moveCategories(from: from, to: to)
-                }
-
-                Button(action: addCategory) {
-                    Label("添加新分类", systemImage: "plus.circle")
-                }
             }
 
-            Section("快捷键设置") {
-                HStack {
-                    Text("开始专注 / 暂停")
-                    Spacer()
-                    KeyboardShortcuts.Recorder(for: .startPauseFocus)
+            // 2. AI & Sync Integrations
+            Section("AI 与 外部同步") {
+                DisclosureGroup("AI 模型配置") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Picker("供应商", selection: $provider) {
+                            ForEach(providers, id: \.0) { p in Text(p.1).tag(p.0) }
+                        }
+                        .pickerStyle(.segmented)
+                        
+                        TextField("模型 (Model)", text: $model)
+                            .textFieldStyle(.roundedBorder)
+                            
+                        if provider == "custom" {
+                            TextField("接口地址 (Base URL)", text: $baseURL)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        
+                        HStack {
+                            if apiKeyMasked {
+                                SecureField("密钥 (API Key)", text: $apiKey)
+                                    .textFieldStyle(.roundedBorder)
+                            } else {
+                                TextField("密钥 (API Key)", text: $apiKey)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                            Button(apiKeyMasked ? "显示" : "隐藏") { apiKeyMasked.toggle() }
+                                .buttonStyle(.plain)
+                                .font(.caption2)
+                        }
+                        
+                        Toggle("复盘定时生成", isOn: $autoSummaryEnabled)
+                        if autoSummaryEnabled {
+                            DatePicker("执行时间", selection: $autoSummaryTime, displayedComponents: [.hourAndMinute])
+                                .datePickerStyle(.compact)
+                        }
+                    }
+                    .padding(.vertical, 8)
                 }
-                HStack {
-                    Text("开启纯专注模式")
-                    Spacer()
-                    KeyboardShortcuts.Recorder(for: .togglePureFocus)
+                
+                DisclosureGroup("Obsidian 联动") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            TextField("库路径", text: $obsidianVaultPath)
+                                .textFieldStyle(.roundedBorder).disabled(true)
+                            Button("选取") { pickObsidianVault() }
+                        }
+                        Text("格式: {vault}/sources/diarys/{yyyyMMdd}.md").font(.system(size: 9)).foregroundStyle(.secondary)
+                        
+                        Divider().padding(.vertical, 4)
+                        
+                        Text("导出匹配正则 (可选)").font(.caption).foregroundStyle(.secondary)
+                        TextField(#"^\s*-\s+(\d{1,2}):(\d{2})\s+(.+?)\s*$"#, text: $obsidianImportRegex)
+                            .textFieldStyle(.roundedBorder)
+                        Text("支持捕获组: $1=时, $2=分, $3=内容").font(.system(size: 9)).foregroundStyle(.secondary)
+
+                        Toggle("自动导入今日日记", isOn: $obsidianAutoImport)
+                        Button("立即同步") { importObsidianNow() }
+                            .disabled(obsidianVaultPath.isEmpty)
+                        if let status = obsidianImportStatus {
+                            Text(status).font(.caption2).foregroundStyle(.blue)
+                        }
+                    }
+                    .padding(.vertical, 8)
                 }
-                Text("注: 快捷键在应用运行时全局生效。")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+
+                Toggle("同步专注记录到系统日历", isOn: $calendarSyncEnabled)
+                    .onChange(of: calendarSyncEnabled) { enabled in
+                        if enabled {
+                            CalendarSyncService.shared.requestAccess { if !$0 { calendarSyncEnabled = false } }
+                        }
+                    }
             }
 
-            Section("日志与数据") {
-                Button("Open Logs Folder") {
-                    let logDir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
-                        .appendingPathComponent("Logs/SeedoMac")
+            // 3. UI, UX & Privacy
+            Section("外观、交互与隐私") {
+                DisclosureGroup("休息覆盖层外观") {
+                    VStack(spacing: 12) {
+                        ColorPicker("背景颜色", selection: $breakBackgroundColor)
+                        
+                        HStack {
+                            Text("背景图片")
+                            Spacer()
+                            if !breakBackgroundImagePath.isEmpty {
+                                Button("清除") { clearBackgroundImage() }.buttonStyle(.plain).foregroundStyle(.red)
+                            }
+                            Button(breakBackgroundImagePath.isEmpty ? "选择图片" : "更换") { selectBackgroundImage() }
+                        }
+                        
+                        Button("测试覆盖层效果") { triggerTestBreak() }.buttonStyle(.bordered).frame(maxWidth: .infinity)
+                    }
+                    .padding(.vertical, 8)
+                }
+                
+                DisclosureGroup("全局快捷键") {
+                    VStack(spacing: 10) {
+                        HStack {
+                            Text("开始/暂停专注")
+                            Spacer()
+                            KeyboardShortcuts.Recorder(for: .startPauseFocus)
+                        }
+                        HStack {
+                            Text("开启专注悬浮窗")
+                            Spacer()
+                            KeyboardShortcuts.Recorder(for: .togglePureFocus)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
+                
+                HStack {
+                    Text("热门应用统计数量")
+                    Spacer()
+                    TextField("", value: $topAppsLimit, format: .number).frame(width: 40).textFieldStyle(.roundedBorder)
+                    Stepper("", value: $topAppsLimit, in: 5...30)
+                }
+                
+                Toggle("脱敏窗口标题 (隐私模式)", isOn: $appState.isRedactTitles)
+            }
+
+            // 4. Data & Logic
+            Section("标签与分类管理") {
+                DisclosureGroup("管理分类 (\(categories.count))") {
+                    VStack(spacing: 8) {
+                        ForEach($categories) { $cat in
+                            HStack {
+                                ColorPicker("", selection: Binding(
+                                    get: { cat.color },
+                                    set: { updateCategoryColor(id: cat.id, newHex: colorToHex($0)) }
+                                )).labelsHidden().frame(width: 30)
+                                TextField("名称", text: $cat.name).textFieldStyle(.plain).onSubmit { saveCategory(cat) }
+                                Button { deleteCategory(cat) } label: { Image(systemName: "trash").foregroundStyle(.red) }.buttonStyle(.plain)
+                            }
+                        }
+                        .onMove { moveCategories(from: $0, to: $1) }
+                        
+                        Button(action: addCategory) { Label("添加新分类", systemImage: "plus.circle") }
+                            .buttonStyle(.plain).padding(.top, 4)
+                    }
+                    .padding(.vertical, 8)
+                }
+                
+                Button("打开日志目录") {
+                    let logDir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0].appendingPathComponent("Logs/SeedoMac")
                     try? FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
                     NSWorkspace.shared.open(logDir)
+                }
+                .buttonStyle(.link)
+                
+                DisclosureGroup("数据管理 (备份与恢复)") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("导出所有记录、分类和 AI 总结为 JSON 文件。可用于在不同设备间迁移或作为备份。").font(.caption2).foregroundStyle(.secondary)
+                        
+                        HStack {
+                            Button {
+                                DataManagementService.shared.exportData { result in
+                                    switch result {
+                                    case .success: saveStatus = "导出成功 ✓"
+                                    case .failure(let err): saveStatus = "导出失败: \(err.localizedDescription)"
+                                    }
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { saveStatus = nil }
+                                }
+                            } label: {
+                                Label("导出备份 (JSON)", systemImage: "square.and.arrow.up")
+                            }
+                            
+                            Button {
+                                DataManagementService.shared.importData { result in
+                                    switch result {
+                                    case .success(let count): 
+                                        saveStatus = "成功导入 \(count) 条记录 ✓"
+                                        refreshCategories()
+                                    case .failure(let err): saveStatus = "导入失败: \(err.localizedDescription)"
+                                    }
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { saveStatus = nil }
+                                }
+                            } label: {
+                                Label("导入备份 (JSON)", systemImage: "square.and.arrow.down")
+                            }
+                        }
+                    }
+                    .padding(.vertical, 8)
                 }
             }
 
             HStack {
                 Spacer()
-                if let status = saveStatus {
-                    Text(status).foregroundStyle(.secondary).font(.caption)
-                }
-                Button("Save Settings") { saveSettings() }
-                    .buttonStyle(.borderedProminent)
+                if let status = saveStatus { Text(status).foregroundStyle(.secondary).font(.caption) }
+                Button("保存设置") { saveSettings() }.buttonStyle(.borderedProminent)
             }
         }
         .formStyle(.grouped)
@@ -364,6 +321,7 @@ struct SettingsView: View {
         autostartEnabled = (SMAppService.mainApp.status == .enabled)
         obsidianVaultPath = AppDatabase.shared.setting(for: "obsidian_vault_path") ?? ""
         obsidianAutoImport = (AppDatabase.shared.setting(for: "obsidian_auto_import") == "true")
+        obsidianImportRegex = AppDatabase.shared.setting(for: "obsidian_import_regex") ?? ""
         autoSummaryEnabled = (AppDatabase.shared.setting(for: "auto_summary_enabled") == "true")
         autoSummaryTime = Self.parseTimeOfDay(
             hour: AppDatabase.shared.setting(for: "auto_summary_hour"),
@@ -383,6 +341,7 @@ struct SettingsView: View {
         breakBackgroundColor = Color(hex: bgHex)
         breakBackgroundImagePath = AppDatabase.shared.setting(for: "break_background_image_path") ?? ""
         calendarSyncEnabled = AppDatabase.shared.setting(for: "calendar_sync_enabled") == "true"
+        topAppsLimit = Int(AppDatabase.shared.setting(for: "stats_top_apps_limit") ?? "10") ?? 10
 
         if let match = providers.first(where: { $0.2 == baseURL }) {
             provider = match.0
@@ -404,6 +363,7 @@ struct SettingsView: View {
         AppDatabase.shared.saveSetting(key: "obsidian_vault_path", value: obsidianVaultPath)
         AppDatabase.shared.saveSetting(key: "obsidian_auto_import",
                                        value: obsidianAutoImport ? "true" : "false")
+        AppDatabase.shared.saveSetting(key: "obsidian_import_regex", value: obsidianImportRegex)
         AppDatabase.shared.saveSetting(key: "auto_summary_enabled",
                                        value: autoSummaryEnabled ? "true" : "false")
         let comps = Calendar.current.dateComponents([.hour, .minute], from: autoSummaryTime)
@@ -420,6 +380,7 @@ struct SettingsView: View {
         AppDatabase.shared.saveSetting(key: "break_background_hex", value: colorToHex(breakBackgroundColor))
         AppDatabase.shared.saveSetting(key: "break_background_image_path", value: breakBackgroundImagePath)
         AppDatabase.shared.saveSetting(key: "calendar_sync_enabled", value: calendarSyncEnabled ? "true" : "false")
+        AppDatabase.shared.saveSetting(key: "stats_top_apps_limit", value: String(topAppsLimit))
         if breakEnabledToday {
             AppDatabase.shared.saveSetting(key: "break_disabled_day", value: "")
         } else {

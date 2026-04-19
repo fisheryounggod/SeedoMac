@@ -3,13 +3,13 @@ import SwiftUI
 import Charts
 
 enum StatsPeriod: String, CaseIterable, Identifiable {
-    case today  = "Today"
-    case week   = "Week"
-    case month  = "Month"
-    case quarter = "Quarter"
-    case halfYear = "Half"
-    case year   = "Year"
-    case custom = "Custom"
+    case today  = "今日"
+    case week   = "周"
+    case month  = "月"
+    case quarter = "季"
+    case halfYear = "半年"
+    case year   = "年"
+    case custom = "自定义"
 
     var id: String { rawValue }
 }
@@ -39,8 +39,10 @@ struct StatsView: View {
         
         var id: String {
             switch self {
-            case .session(let s): return "s-\(s.id ?? 0)"
-            case .summary(let sum): return "sum-\(sum.date)"
+            case .session(let s):
+                return "s-\(s.id ?? 0)-\(s.summary.hashValue)-\(s.startTs)"
+            case .summary(let sum):
+                return "sum-\(sum.date)"
             }
         }
         
@@ -91,6 +93,8 @@ struct StatsView: View {
     // Visualization State
     @State private var isHoveringTagChart: Bool = false
     @State private var hoveredAngle: Double? = nil
+    @State private var hoveredTrendPoint: TrendPoint? = nil
+    @State private var hoveredX: String? = nil
 
     // Plan section (Unified)
     @State private var dailyPlan: String = ""
@@ -99,34 +103,89 @@ struct StatsView: View {
     @State private var editingScope: PlanScope? = nil
     @State private var isEditingPlans: Bool = false
     @State private var planStatus: String? = nil
+    
+    // AI Analysis & Draft
+    @State private var aiDraftContent: String = ""
+    @State private var isSavingDraft: Bool = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 25) {
-                // 1. Top Compact Plan Ribbon
-                unifiedPlanBoard
-                    .padding(.bottom, 5)
+        VStack(spacing: 0) {
+            // 1. Top Bar: Period Selection & AI Review Button (Fixed)
+            HStack(spacing: 12) {
+                periodSelector
                 
-                // 2. Main Trend
-                trendChartSection
+                Spacer()
                 
-                VStack(alignment: .leading, spacing: 20) {
-                    periodSelector
-                    if period == .custom { customRangePicker }
+                HStack(spacing: 8) {
+                    Button(action: { showingSettings = true }) {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 14, weight: .bold))
+                            .padding(6)
+                            .background(Circle().fill(Color.primary.opacity(0.05)))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
                     
-                    // 3. Stats Analytics Cards (Aligned)
-                    statsCardsRow
-                    
-                    // 4. AI Insight Highlights
-                    aiSummaryFocalSection
-                        .frame(maxWidth: .infinity)
+                    Button(action: generateAISummary) {
+                        HStack(spacing: 6) {
+                            if isLoadingAI {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Image(systemName: "sparkles")
+                            }
+                            Text("AI 复盘")
+                        }
+                        .font(.system(size: 11, weight: .bold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            ZStack {
+                                Color.purple.opacity(0.1)
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(Color.purple.opacity(0.3), lineWidth: 1)
+                            }
+                        )
+                        .foregroundStyle(.purple)
+                    }
+                    .buttonStyle(.plain)
                 }
+            }
+            .padding(.horizontal, 25)
+            .padding(.vertical, 16)
+            .background(.ultraThinMaterial)
+            .zIndex(10)
+            
+            Divider()
+            
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    // 2. Unified Plan Board (Goal Banner)
+                    unifiedPlanBoard
+                        .padding(.bottom, 5)
+                
+                // 3. Main Data Area: 2 Columns
+                HStack(alignment: .top, spacing: 20) {
+                    // Left Column: Top Apps
+                    topAppsSection
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    
+                    // Right Column: Charts Stack
+                    VStack(alignment: .trailing, spacing: 20) {
+                        trendChartSection
+                        tagStatsSection
+                    }
+                    .frame(width: 380)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                
+                if period == .custom { customRangePicker }
                 
                 historySection
             }
             .padding(25)
         }
-        .sheet(isPresented: $isEditingPlans) {
+    }
+    .sheet(isPresented: $isEditingPlans) {
             PlanBoardEditorSheet(
                 dailyPlan: $dailyPlan,
                 monthlyPlan: $monthlyPlan,
@@ -166,12 +225,17 @@ struct StatsView: View {
                 onCancel: { showingAddActivity = false }
             )
         }
-        .sheet(isPresented: $showingSettings) {
+        .sheet(isPresented: $showingSettings, onDismiss: {
+            appState.shouldShowSettingsSheet = false
+        }) {
             VStack {
                 HStack {
                     Text("设置").font(.headline)
                     Spacer()
-                    Button("关闭") { showingSettings = false }
+                    Button("关闭") { 
+                        showingSettings = false 
+                        appState.shouldShowSettingsSheet = false
+                    }
                 }
                 .padding()
                 SettingsView(appState: appState)
@@ -202,10 +266,19 @@ struct StatsView: View {
         .onChange(of: period) { _ in loadPeriodData() }
         .onChange(of: customStart) { _ in if period == .custom { loadPeriodData() } }
         .onChange(of: customEnd)   { _ in if period == .custom { loadPeriodData() } }
-        .onReceive(NotificationCenter.default.publisher(for: .shouldShowSettings)) { _ in
-            showingSettings = true
+        .onChange(of: appState.shouldShowSettingsSheet) { newValue in
+            if newValue {
+                showingSettings = true
+                appState.shouldShowSettingsSheet = false
+            }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .shouldShowAddActivity)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .shouldShowAddActivity)) { note in
+            if let durationSecs = note.object as? Double {
+                // Pre-fill duration if passed in notification (from Stop & Record)
+                // We'll pass this through a specialized state if needed, or just trigger the sheet
+                // For now, let's use a simpler approach: the sheet will check appState if prefilled
+                NotificationCenter.default.post(name: NSNotification.Name("PrefillAddActivity"), object: durationSecs)
+            }
             showingAddActivity = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .shouldRunAISummary)) { _ in
@@ -289,24 +362,87 @@ struct StatsView: View {
                     if period == .today {
                         BarMark(
                             x: .value("Time", pt.timeLabel),
-                            y: .value("Duration", pt.durationSecs)
+                            y: .value("Duration", pt.durationSecs / 60.0)
                         )
                         .foregroundStyle(by: .value("Category", pt.category.name))
                         .cornerRadius(4)
                     } else {
                         LineMark(
                             x: .value("Time", pt.timeLabel),
-                            y: .value("Duration", pt.durationSecs)
+                            y: .value("Duration", pt.durationSecs / 60.0)
                         )
                         .foregroundStyle(by: .value("Category", pt.category.name))
                         .interpolationMethod(.monotone)
                         .lineStyle(StrokeStyle(lineWidth: 2))
+                        
+                        PointMark(
+                            x: .value("Time", pt.timeLabel),
+                            y: .value("Duration", pt.durationSecs / 60.0)
+                        )
+                        .foregroundStyle(by: .value("Category", pt.category.name))
+                        .symbolSize(hoveredX == pt.timeLabel ? 100 : 40)
+                    }
+                    
+                    if let hoveredX = hoveredX, hoveredX == pt.timeLabel {
+                        RuleMark(x: .value("Time", hoveredX))
+                            .foregroundStyle(.secondary.opacity(0.3))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [5, 5]))
                     }
                 }
                 .chartForegroundStyleScale(domain: names, range: colors)
                 .chartLegend(.hidden)
+                .chartYAxis {
+                    AxisMarks(position: .leading) { value in
+                        AxisGridLine()
+                        AxisTick()
+                        AxisValueLabel {
+                            if let val = value.as(Double.self) {
+                                Text("\(Int(val)) min")
+                                    .font(.system(size: 8))
+                            }
+                        }
+                    }
+                }
+                .chartOverlay { proxy in
+                    GeometryReader { geo in
+                        Rectangle().fill(.clear).contentShape(Rectangle())
+                            .onContinuousHover { phase in
+                                switch phase {
+                                case .active(let location):
+                                    if let xLabel: String = proxy.value(atX: location.x) {
+                                        hoveredX = xLabel
+                                    }
+                                case .ended:
+                                    hoveredX = nil
+                                }
+                            }
+                    }
+                }
                 .frame(height: 180)
                 .padding(.top, 10)
+                .overlay(alignment: .topTrailing) {
+                    if let hoverX = hoveredX {
+                        let points = trendPoints.filter { $0.timeLabel == hoverX }
+                        if !points.isEmpty {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(hoverX).font(.system(size: 10, weight: .bold))
+                                ForEach(points) { p in
+                                    HStack(spacing: 4) {
+                                        Circle().fill(p.category.color).frame(width: 6, height: 6)
+                                        Text(p.category.name).font(.system(size: 9))
+                                        Spacer()
+                                        Text(formatDuration(p.durationSecs)).font(.system(size: 9, design: .monospaced))
+                                    }
+                                }
+                            }
+                            .padding(8)
+                            .background(.regularMaterial)
+                            .cornerRadius(8)
+                            .shadow(radius: 2)
+                            .padding(10)
+                        }
+                    }
+                }
             }
         }
         .padding(16)
@@ -336,15 +472,16 @@ struct StatsView: View {
             }
         }
         .pickerStyle(.segmented)
+        .labelsHidden()
         .frame(maxWidth: .infinity)
     }
 
     private var customRangePicker: some View {
         HStack(spacing: 12) {
-            DatePicker("From", selection: $customStart, in: ...customEnd, displayedComponents: .date)
+            DatePicker("起始", selection: $customStart, in: ...customEnd, displayedComponents: .date)
                 .datePickerStyle(.compact).labelsHidden()
             Text("→").foregroundStyle(.secondary)
-            DatePicker("To", selection: $customEnd, in: customStart...Date(), displayedComponents: .date)
+            DatePicker("结束", selection: $customEnd, in: customStart...Date(), displayedComponents: .date)
                 .datePickerStyle(.compact).labelsHidden()
             Spacer()
         }
@@ -373,8 +510,9 @@ struct StatsView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 40)
             } else {
+                let limit = BreakConfig.load().topAppsLimit
                 VStack(spacing: 0) {
-                    ForEach(Array(periodApps.prefix(5).enumerated()), id: \.offset) { index, app in
+                    ForEach(Array(periodApps.prefix(limit).enumerated()), id: \.offset) { index, app in
                         HStack {
                             Text(app.appOrDomain)
                                 .lineLimit(1)
@@ -387,7 +525,7 @@ struct StatsView: View {
                         }
                         .padding(.vertical, 8)
                         
-                        if index < min(periodApps.count, 5) - 1 {
+                        if index < min(periodApps.count, limit) - 1 {
                             Divider().opacity(0.5)
                         }
                     }
@@ -397,8 +535,6 @@ struct StatsView: View {
         .padding(16)
         .background(Color.secondary.opacity(0.04))
         .cornerRadius(16)
-        .frame(maxWidth: .infinity)
-        .frame(minHeight: 380, alignment: .top)
     }
 
     private var tagStatsSection: some View {
@@ -461,8 +597,7 @@ struct StatsView: View {
         .padding(16)
         .background(Color.secondary.opacity(0.04))
         .cornerRadius(16)
-        .frame(width: 320)
-        .frame(minHeight: 380, alignment: .top)
+        .frame(maxWidth: .infinity, alignment: .top)
         .onHover { over in
             withAnimation(.spring()) {
                 isHoveringTagChart = over
@@ -615,14 +750,39 @@ struct StatsView: View {
                 
                 Spacer()
                 
-                Picker("排序", selection: $historySortOrder) {
-                    ForEach(SortOrder.allCases, id: \.self) { order in
-                        Text(order.rawValue).tag(order)
+                Button(action: {
+                    if expandedDays.count == groupedHistoryDates().count {
+                        expandedDays = []
+                    } else {
+                        expandedDays = Set(groupedHistoryDates())
                     }
+                }) {
+                    Text(expandedDays.count == groupedHistoryDates().count ? "全部折叠" : "全部展开")
+                        .font(.system(size: 10, weight: .bold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.primary.opacity(0.05))
+                        .cornerRadius(6)
                 }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .controlSize(.small)
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+
+                Button(action: {
+                    historySortOrder = (historySortOrder == .newestFirst ? .oldestFirst : .newestFirst)
+                }) {
+                    HStack(spacing: 4) {
+                        Text(historySortOrder.rawValue)
+                        Image(systemName: historySortOrder == .newestFirst ? "arrow.down" : "arrow.up")
+                            .font(.system(size: 8))
+                    }
+                    .font(.system(size: 10, weight: .bold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.primary.opacity(0.05))
+                    .cornerRadius(6)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
                 
                 Button(action: { showingAddActivity = true }) {
                     Image(systemName: "plus.circle.fill")
@@ -640,6 +800,7 @@ struct StatsView: View {
                 let sortedItems = historyItems.sorted(by: {
                     historySortOrder == .newestFirst ? ($0.timestamp > $1.timestamp) : ($0.timestamp < $1.timestamp)
                 })
+                
                 let grouped = Dictionary(grouping: sortedItems) { item in
                     let date = Date(timeIntervalSince1970: Double(item.timestamp) / 1000)
                     return Self.dateFormatter.string(from: date)
@@ -647,13 +808,12 @@ struct StatsView: View {
                 let sortedDates = grouped.keys.sorted(by: historySortOrder == .newestFirst ? (>) : (<))
                 
                 ForEach(sortedDates, id: \.self) { date in
+                    let dayItems = grouped[date] ?? []
                     let isExpanded = expandedDays.contains(date)
                     
                     VStack(alignment: .leading, spacing: 0) {
                         Button {
-                            withAnimation {
-                                toggleDayExpanded(date)
-                            }
+                            withAnimation { toggleDayExpanded(date) }
                         } label: {
                             HStack {
                                 Image(systemName: "chevron.right")
@@ -668,7 +828,7 @@ struct StatsView: View {
                                 Spacer()
                                 
                                 if !isExpanded {
-                                    Text("\(grouped[date]?.count ?? 0) 项")
+                                    Text("\(dayItems.count) 项")
                                         .font(.system(size: 8))
                                         .foregroundStyle(.tertiary)
                                 }
@@ -682,7 +842,8 @@ struct StatsView: View {
                         
                         if isExpanded {
                             VStack(alignment: .leading, spacing: 10) {
-                                ForEach(grouped[date] ?? []) { item in
+                                let mergedSessions = mergeHistoryItems(dayItems)
+                                ForEach(mergedSessions) { item in
                                     switch item {
                                     case .session(let s):
                                         sessionRow(s)
@@ -699,7 +860,218 @@ struct StatsView: View {
                     .padding(.bottom, 5)
                 }
             }
+            
+            // 4. AI Analysis & Manual Reflection Box
+            aiAnalysisRecordingSection
+                .padding(.top, 24)
         }
+    }
+
+    private var aiAnalysisRecordingSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Divider()
+                .padding(.vertical, 8)
+                
+            HStack {
+                Label("深度复盘与心得", systemImage: "sparkles")
+                    .font(.headline)
+                
+                Spacer()
+                
+                if isLoadingAI {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button(action: generateAISummaryToDraft) {
+                        Label("AI 协助复盘", systemImage: "wand.and.stars")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.blue)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            
+            VStack(alignment: .leading, spacing: 8) {
+                TextEditor(text: $aiDraftContent)
+                    .font(.system(size: 14))
+                    .frame(minHeight: 120)
+                    .padding(12)
+                    .background(Color.primary.opacity(0.03))
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                    )
+                
+                HStack {
+                    Text("提示：保存后将作为当天的总复盘显示在历史列表中。")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    
+                    Spacer()
+                    
+                    Button(action: saveAIDraft) {
+                        if isSavingDraft {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text("保存到复盘记录")
+                                .font(.system(size: 12, weight: .bold))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.blue)
+                                .foregroundStyle(.white)
+                                .cornerRadius(8)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(aiDraftContent.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+    }
+    
+    private func generateAISummaryToDraft() {
+        isLoadingAI = true
+        let (startMs, endMs) = periodRange()
+        
+        let context = SummaryContext(
+            dateRange: periodKey(),
+            topApps: periodApps,
+            workSessions: historyItems.compactMap { item -> WorkSession? in
+                if case .session(let s) = item { return s }
+                return nil
+            },
+            planDaily: dailyPlan,
+            planMonthly: monthlyPlan,
+            planYearly: yearlyPlan
+        )
+        
+        AIService.shared.generateSummary(context: context, periodLabel: periodLabel()) { result in
+            DispatchQueue.main.async {
+                self.isLoadingAI = false
+                switch result {
+                case .success(let sum):
+                    withAnimation {
+                        self.aiDraftContent = sum.content
+                    }
+                case .failure(let error):
+                    print("AI generation failed: \(error)")
+                }
+            }
+        }
+    }
+    
+    private func saveAIDraft() {
+        guard !aiDraftContent.isEmpty else { return }
+        isSavingDraft = true
+        
+        let dateKey = periodKey()
+        let sum = DailySummary(
+            date: dateKey,
+            content: aiDraftContent,
+            score: 0,
+            keywords: "",
+            createdAt: Int64(Date().timeIntervalSince1970 * 1000)
+        )
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try AIService.shared.persistSummary(sum)
+                DispatchQueue.main.async {
+                    self.isSavingDraft = false
+                    self.aiDraftContent = ""
+                    self.loadData()
+                }
+            } catch {
+                print("Failed to save AI summary: \(error)")
+                DispatchQueue.main.async { self.isSavingDraft = false }
+            }
+        }
+    }
+    
+    private func groupedHistoryDates() -> [String] {
+        let sortedItems = historyItems.sorted(by: {
+            historySortOrder == .newestFirst ? ($0.timestamp > $1.timestamp) : ($0.timestamp < $1.timestamp)
+        })
+        let grouped = Dictionary(grouping: sortedItems) { item in
+            let date = Date(timeIntervalSince1970: Double(item.timestamp) / 1000)
+            return Self.dateFormatter.string(from: date)
+        }
+        return grouped.keys.sorted(by: historySortOrder == .newestFirst ? (>) : (<))
+    }
+    
+    // Wrapper for session display including multiple intervals
+    struct MergedSession: Identifiable {
+        let id = UUID()
+        var session: WorkSession
+        var intervals: [String] = []
+    }
+    
+    enum MergedLogItem: Identifiable {
+        case session(MergedSession)
+        case summary(DailySummary)
+        
+        var id: String {
+            switch self {
+            case .session(let s): return "ms-\(s.session.id ?? 0)-\(s.id)"
+            case .summary(let sum): return "sum-\(sum.date)"
+            }
+        }
+    }
+    
+    private func mergeHistoryItems(_ items: [LogItem]) -> [MergedLogItem] {
+        var result: [MergedLogItem] = []
+        var sessionGroups: [String: MergedSession] = [:]
+        
+        for item in items {
+            switch item {
+            case .summary(let sum):
+                result.append(.summary(sum))
+            case .session(let s):
+                let key = "\(s.categoryId ?? "none")-\(s.summary)"
+                let interval = formatTimestampRange(start: s.startTs, end: s.endTs)
+                
+                if var existing = sessionGroups[key] {
+                    let addedMs = s.endTs - s.startTs
+                    existing.session.endTs += addedMs
+                    existing.session.startTs = max(existing.session.startTs, s.startTs)
+                    if !existing.intervals.contains(interval) {
+                        existing.intervals.append(interval)
+                    }
+                    sessionGroups[key] = existing
+                } else {
+                    sessionGroups[key] = MergedSession(session: s, intervals: [interval])
+                }
+            }
+        }
+        
+        let mergedSessions = sessionGroups.values.sorted { $0.session.startTs > $1.session.startTs }.map { MergedLogItem.session($0) }
+        result.append(contentsOf: mergedSessions)
+        
+        return result.sorted {
+            let ts1 = timestamp(for: $0)
+            let ts2 = timestamp(for: $1)
+            return historySortOrder == .newestFirst ? (ts1 > ts2) : (ts1 < ts2)
+        }
+    }
+
+    private func timestamp(for item: MergedLogItem) -> Int64 {
+        switch item {
+        case .session(let ms): return ms.session.startTs
+        case .summary(let sum):
+            let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+            if let date = f.date(from: sum.date) {
+                return Int64(date.timeIntervalSince1970 * 1000) + 86_399_999
+            }
+            return sum.createdAt
+        }
+    }
+
+    private func formatTimestampRange(start: Int64, end: Int64) -> String {
+        let s = Date(timeIntervalSince1970: Double(start) / 1000)
+        let e = Date(timeIntervalSince1970: Double(end) / 1000)
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return "\(f.string(from: s)) - \(f.string(from: e))"
     }
     
     struct SummaryHistoryRow: View {
@@ -734,6 +1106,11 @@ struct StatsView: View {
             .padding(12)
             .background(Color.purple.opacity(0.04))
             .cornerRadius(10)
+            .onTapGesture {
+                if let appDelegate = NSApp.delegate as? AppDelegate {
+                    appDelegate.showTransientAISummary(context: summary.content, label: summary.date)
+                }
+            }
         }
     }
     
@@ -756,8 +1133,9 @@ struct StatsView: View {
         return dateStr
     }
 
-    private func sessionRow(_ session: WorkSession) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+    private func sessionRow(_ merged: MergedSession) -> some View {
+        let session = merged.session
+        return HStack(alignment: .top, spacing: 12) {
             VStack {
                 Circle()
                     .fill(session.isManual ? Color.orange : Color.blue)
@@ -793,6 +1171,12 @@ struct StatsView: View {
                         .foregroundStyle(.secondary)
                 }
                 
+                if !merged.intervals.isEmpty {
+                    Text(merged.intervals.joined(separator: " · "))
+                        .font(.system(size: 8))
+                        .foregroundStyle(.secondary.opacity(0.8))
+                }
+
                 if !session.title.isEmpty {
                     Text("备注: " + session.title)
                         .font(.subheadline)
@@ -861,6 +1245,7 @@ struct StatsView: View {
                 // Also sync to calendar if enabled
                 CalendarSyncService.shared.sync(session: s)
                 
+                
                 DispatchQueue.main.async {
                     loadData()
                 }
@@ -888,6 +1273,8 @@ struct StatsView: View {
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 try WorkSessionStore().update(session)
+                
+                
                 DispatchQueue.main.async {
                     loadData()
                 }
@@ -905,6 +1292,8 @@ struct StatsView: View {
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 try WorkSessionStore().insert(&copy)
+                
+
                 DispatchQueue.main.async {
                     loadData()
                     // Delay slightly to ensure sheet animation doesn't glitch if loadData takes time
@@ -986,14 +1375,12 @@ struct StatsView: View {
                         self.isLoadingAI = false
                         switch result {
                         case .success(let s):
-                            // Persist to DB
-                            try? AIService.shared.persistSummary(s)
-                            self.summary = s
-                            
-                            // NEW: Append to Obsidian diary
-                            try? ObsidianImporter.shared.appendSummary(s.content)
-                            
-                        case .failure(let e): self.aiError = e.localizedDescription
+                            // Manual trigger: Auto-persist (upsert) to keep only one entry for today/period.
+                            // This replaces the old transient window flow.
+                            self.aiDraftContent = s.content
+                            self.saveAIDraft()
+                        case .failure(let e): 
+                            self.aiError = e.localizedDescription
                         }
                     }
                 }
@@ -1176,6 +1563,9 @@ struct PlanBoardEditorSheet: View {
     @State private var localMonthly: String = ""
     @State private var localYearly: String = ""
     
+    @FocusState private var focusField: Field?
+    enum Field { case daily, monthly, yearly }
+    
     var onSave: (String, String, String) -> Void
     var onCancel: () -> Void
     
@@ -1183,16 +1573,19 @@ struct PlanBoardEditorSheet: View {
         NavigationStack {
             Form {
                 Section("日度目标") {
-                    TextEditor(text: $localDaily)
-                        .frame(height: 100)
+                    TextField("输入今日计划...", text: $localDaily, axis: .vertical)
+                        .lineLimit(4...10)
+                        .focused($focusField, equals: .daily)
                 }
                 Section("阶段计划 (月度)") {
-                    TextEditor(text: $localMonthly)
-                        .frame(height: 100)
+                    TextField("输入本月计划...", text: $localMonthly, axis: .vertical)
+                        .lineLimit(4...10)
+                        .focused($focusField, equals: .monthly)
                 }
                 Section("长期愿景 (年度)") {
-                    TextEditor(text: $localYearly)
-                        .frame(height: 100)
+                    TextField("输入年度愿景...", text: $localYearly, axis: .vertical)
+                        .lineLimit(4...10)
+                        .focused($focusField, equals: .yearly)
                 }
             }
             .navigationTitle("编辑计划 & 目标")
@@ -1213,6 +1606,11 @@ struct PlanBoardEditorSheet: View {
             localDaily = dailyPlan
             localMonthly = monthlyPlan
             localYearly = yearlyPlan
+            
+            // Auto focus the first field
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                focusField = .daily
+            }
         }
     }
 }

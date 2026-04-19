@@ -37,6 +37,17 @@ final class ActivityTracker {
             eventType: CGEventType(rawValue: UInt32.max)!
         )
         let newAFK = idleSecs >= _afkThreshold
+        
+        if newAFK && !isAFK && _isTracking {
+            // First time hitting threshold while tracking
+            let endTs = Int64(Date().timeIntervalSince1970 * 1000) - Int64(idleSecs * 1000)
+            NotificationCenter.default.post(
+                name: .afkThresholdReached,
+                object: nil,
+                userInfo: ["endTs": endTs]
+            )
+        }
+        
         if newAFK != isAFK {
             isAFK = newAFK
             NotificationCenter.default.post(
@@ -79,6 +90,11 @@ final class ActivityTracker {
         timer = nil
         flushTimer?.cancel()
         flushTimer = nil
+        buffer.flushAll()
+    }
+
+    /// Clears the current session buffer — used for 'Record and Reset'
+    func reset() {
         buffer.flushAll()
     }
 
@@ -140,6 +156,7 @@ final class ActivityTracker {
 
 extension Notification.Name {
     static let afkStateDidChange = Notification.Name("tech.seedo.afkStateDidChange")
+    static let afkThresholdReached = Notification.Name("tech.seedo.afkThresholdReached")
     static let workSessionDidSave = Notification.Name("tech.seedo.workSessionDidSave")
     static let breakShouldStart   = Notification.Name("tech.seedo.breakShouldStart")
     static let afkReturnDetected  = Notification.Name("tech.seedo.afkReturnDetected")

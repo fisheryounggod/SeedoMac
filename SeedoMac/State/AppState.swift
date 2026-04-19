@@ -3,6 +3,8 @@ import Foundation
 import Combine
 
 final class AppState: ObservableObject {
+    static let shared = AppState()
+    
     // Tracking status
     @Published var isTracking: Bool = true
     @Published var currentApp: String = ""
@@ -10,12 +12,15 @@ final class AppState: ObservableObject {
     @Published var currentURL: String = ""
     @Published var currentSessionStartMs: Int64 = 0
 
+    @Published var isDeepFocusActive: Bool = false
+    
     // Today summary (refreshed every 5s)
     @Published var todayTotalSecs: Double = 0
     @Published var todayTopApps: [AppStat] = []
 
     // UI State
     @Published var selectedTab: DashboardTab = .stats
+    @Published var shouldShowSettingsSheet: Bool = false
 
     // Permissions
     @Published var hasAccessibilityPermission: Bool = false

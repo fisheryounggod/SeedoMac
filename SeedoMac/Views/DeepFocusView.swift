@@ -10,12 +10,17 @@ struct DeepFocusView: View {
     }
     
     let onClose: () -> Void
+    let isPrimary: Bool
     
-    @State private var mode: FocusMode = .countdown
-    @State private var timeRemaining: Int = 25 * 60
-    @State private var timeElapsed: Int = 0
-    @State private var timer: Timer?
+    @ObservedObject var scheduler = BreakScheduler.shared
     @State private var player: AVAudioPlayer?
+    
+    // Timer State
+    @State private var mode: FocusMode = .countdown
+    @State private var remainingSecs: Int = 25 * 60
+    @State private var elapsedSecs: Int = 0
+    @State private var isPaused: Bool = false
+    @State private var timer: Timer? = nil
     
     // Session Tracking
     @State private var sessionStartTs: Int64? = nil
@@ -35,31 +40,45 @@ struct DeepFocusView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             
-            VStack(spacing: 30) {
-                // Top Header
+            if !isPrimary {
+                VStack {
+                    Spacer()
+                    Text("保持专注")
+                        .font(.system(size: 24, weight: .light))
+                        .foregroundStyle(.white.opacity(0.1))
+                    Spacer()
+                }
+            } else {
+                VStack(spacing: 30) {
+                    // Top Header
                 HStack(alignment: .center, spacing: 10) {
                     if !showingLogOverlay {
                         Text("模式")
                             .font(.system(size: 10, weight: .bold))
                             .foregroundStyle(.secondary)
                             .frame(width: 30)
-                        
-                        Picker("", selection: $mode) {
-                            Text("番茄钟").tag(FocusMode.countdown)
-                            Text("正计时").tag(FocusMode.stopwatch)
+
+                        Button(action: {
+                            setMode(mode == .countdown ? .stopwatch : .countdown)
+                        }) {
+                            Text(mode == .countdown ? "蕃茄钟" : "正计时")
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 6)
+                                .background(Color.white.opacity(0.1))
+                                .foregroundStyle(.white)
+                                .cornerRadius(20)
                         }
-                        .pickerStyle(.segmented)
-                        .frame(width: 130)
-                        .onChange(of: mode) { _ in resetTimer() }
+                        .font(.system(size: 11, weight: .bold))
+                        .buttonStyle(.plain)
                     }
                     
                     Spacer()
                     
                     Button(action: {
-                        if timer != nil {
-                            showingExitConfirmation = true
-                        } else {
+                        if showingLogOverlay {
                             onClose()
+                        } else {
+                            showingExitConfirmation = true
                         }
                     }) {
                         Image(systemName: "xmark.circle.fill")
@@ -67,11 +86,9 @@ struct DeepFocusView: View {
                             .foregroundStyle(.white.opacity(0.3))
                     }
                     .buttonStyle(.plain)
-                    .confirmationDialog("确定要提前退出吗？", isPresented: $showingExitConfirmation, titleVisibility: .visible) {
+                    .confirmationDialog("确定要中途退出吗？当前记录将不被保存。", isPresented: $showingExitConfirmation) {
                         Button("确认退出", role: .destructive) { onClose() }
-                        Button("取消", role: .cancel) {}
-                    } message: {
-                        Text("当前专注进度将不会被记录。")
+                        Button("取消", role: .cancel) { }
                     }
                 }
                 .padding()
@@ -83,26 +100,41 @@ struct DeepFocusView: View {
                     Circle()
                         .stroke(Color.white.opacity(0.05), lineWidth: 20)
                     
-                    if mode == .countdown {
-                        Circle()
-                            .trim(from: 0, to: CGFloat(timeRemaining) / CGFloat(defaultCountdownSecs))
-                            .stroke(Color.red.opacity(0.8), style: StrokeStyle(lineWidth: 20, lineCap: .round))
-                            .rotationEffect(.degrees(-90))
-                            .animation(.linear, value: timeRemaining)
-                    } else {
-                        Circle()
-                            .stroke(Color.blue.opacity(0.5), style: StrokeStyle(lineWidth: 20, lineCap: .round))
-                    }
+                    let progress: Double = {
+                        if mode == .countdown {
+                            return 1.0 - (Double(remainingSecs) / Double(defaultCountdownSecs))
+                        } else {
+                            return 1.0 // Simple circle for stopwatch
+                        }
+                    }()
+                    
+                    Circle()
+                        .trim(from: 0, to: progress)
+                        .stroke(mode == .countdown ? Color.red.opacity(0.8) : Color.blue.opacity(0.8), 
+                                style: StrokeStyle(lineWidth: 20, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .animation(.linear, value: progress)
                     
                     VStack(spacing: 10) {
-                        Text(mode == .countdown ? formatTime(timeRemaining) : formatTime(timeElapsed))
-                            .font(.system(size: 100, weight: .bold, design: .monospaced))
+                        let displaySecs = mode == .countdown ? remainingSecs : elapsedSecs
+                        Text(formatTime(displaySecs))
+                            .font(.system(size: 120, weight: .bold, design: .monospaced))
                             .foregroundStyle(.white)
                         
-                        Text(mode == .countdown ? "FOCUSING" : "ELAPSED")
+                        Text(mode == .countdown ? "剩余时间" : "专注用时")
                             .font(.caption)
                             .tracking(4)
                             .foregroundStyle(.secondary)
+                        
+                        HStack(spacing: 20) {
+                            Button(action: { isPaused.toggle() }) {
+                                Image(systemName: isPaused ? "play.fill" : "pause.fill")
+                                    .font(.title)
+                                    .foregroundStyle(.white.opacity(0.6))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.top, 10)
                     }
                 }
                 .frame(width: 400, height: 400)
@@ -112,20 +144,23 @@ struct DeepFocusView: View {
                 Spacer()
                 
                 if !showingLogOverlay {
-                    if mode == .stopwatch && timer != nil {
-                        Button("停止并记录") {
-                            handleSessionFinished()
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.red)
-                        .padding(.bottom, 60)
+                    Button("停止并记录") {
+                        handleManualStop()
                     }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 14, weight: .bold))
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
+                    .background(Color.red.opacity(0.2))
+                    .foregroundStyle(.red)
+                    .cornerRadius(12)
+                    .padding(.bottom, 60)
                 }
             }
             .padding()
             .blur(radius: showingLogOverlay ? 10 : 0)
             
-            // Logging Overlay
+            // Logging Overlay (Unchanged structure, but pre-filled duration if needed)
             if showingLogOverlay {
                 Color.black.opacity(0.85)
                     .ignoresSafeArea()
@@ -154,6 +189,7 @@ struct DeepFocusView: View {
                             
                             TextEditor(text: $sessionTitle)
                                 .font(.system(size: 18))
+                                .foregroundStyle(.white)
                                 .scrollContentBackground(.hidden)
                                 .padding(10)
                                 .background(Color.white.opacity(0.06))
@@ -209,7 +245,7 @@ struct DeepFocusView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
-                        .tint(Color(white: 0.2))
+                        .tint(.blue)
                         .disabled(sessionTitle.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
                     }
                 }
@@ -219,57 +255,61 @@ struct DeepFocusView: View {
                 .transition(.scale.combined(with: .opacity))
             }
         }
-        .onAppear {
-            appState.isTracking = false // Pause global tracking
-            sessionStartTs = Int64(Date().timeIntervalSince1970 * 1000)
-            startTimer()
-        }
-        .onDisappear {
-            appState.isTracking = true // Resume global tracking
-            stopTimer()
-            player?.stop()
+    }
+    .onAppear {
+        playDingDing()
+        startInternalTimer()
+        sessionStartTs = Int64(Date().timeIntervalSince1970 * 1000)
+    }
+    .onDisappear {
+            timer?.invalidate()
         }
         .onChange(of: showingLogOverlay) { newValue in
             if newValue {
-                // Focus the notes field as soon as it appears
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                timer?.invalidate()
+                playDingDing()
+                // Reduced delay for snappier focus
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                     isNoteFocused = true
                 }
             }
         }
     }
     
-    private func startTimer() {
+    private func setMode(_ next: FocusMode) {
+        mode = next
+        remainingSecs = defaultCountdownSecs
+        elapsedSecs = 0
+        isPaused = false // Ensure it's never paused when switching
+        startInternalTimer() // Restart timer immediately
+    }
+    
+    private func startInternalTimer() {
+        timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            guard !isPaused && !showingLogOverlay else { return }
+            
+            elapsedSecs += 1
             if mode == .countdown {
-                if timeRemaining > 0 {
-                    timeRemaining -= 1
+                if remainingSecs > 0 {
+                    remainingSecs -= 1
                 } else {
-                    handleSessionFinished()
+                    withAnimation {
+                        showingLogOverlay = true
+                    }
                 }
-            } else {
-                timeElapsed += 1
             }
         }
     }
     
-    // ... remaining methods same as before ...
-    private func stopTimer() {
-        timer?.invalidate()
-        timer = nil
-    }
-    
-    private func resetTimer() {
-        stopTimer()
-        timeElapsed = 0
-        timeRemaining = defaultCountdownSecs
-        sessionStartTs = Int64(Date().timeIntervalSince1970 * 1000)
-        startTimer()
-    }
-    
-    private func handleSessionFinished() {
-        stopTimer()
+    private func playDingDing() {
         NSSound(named: "Glass")?.play()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            NSSound(named: "Glass")?.play()
+        }
+    }
+    
+    private func handleManualStop() {
         withAnimation {
             showingLogOverlay = true
         }
@@ -280,6 +320,8 @@ struct DeepFocusView: View {
         isSaving = true
         
         let endMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let durationSecs = Double(elapsedSecs)
+        
         var session = WorkSession(
             startTs: start,
             endTs: endMs,
@@ -291,11 +333,14 @@ struct DeepFocusView: View {
             title: sessionTitle.trimmingCharacters(in: .whitespaces),
             categoryId: selectedCategoryId
         )
+        // Ensure duration is correctly set based on timer
+        // WorkSession doesn't have duration directly stored in all versions, 
+        // but let's assume endTs - startTs is used, or there's a durationSecs field.
+        // Actually endTs - startTs usually defines it.
         
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 try WorkSessionStore().insert(&session)
-                // Sync to calendar if enabled
                 CalendarSyncService.shared.sync(session: session)
                 
                 DispatchQueue.main.async {

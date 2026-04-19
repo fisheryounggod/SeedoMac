@@ -57,7 +57,10 @@ final class ObsidianImporter {
     /// - Label must contain `#log` (case-insensitive) or `#记录`
     /// - Label is everything after the first run of whitespace, with tags stripped
     func parseEntries(_ content: String, day: Date) -> [ParsedEntry] {
-        let pattern = #"^\s*-\s+(\d{1,2}):(\d{2})\s+(.+?)\s*$"#
+        let defaultPattern = #"^\s*-\s+(\d{1,2}):(\d{2})\s+(.+?)\s*$"#
+        let customPattern = AppDatabase.shared.setting(for: "obsidian_import_regex")
+        let pattern = (customPattern != nil && !customPattern!.isEmpty) ? customPattern! : defaultPattern
+        
         guard let regex = try? NSRegularExpression(
             pattern: pattern,
             options: [.anchorsMatchLines]

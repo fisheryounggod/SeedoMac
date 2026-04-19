@@ -18,6 +18,8 @@ struct BreakConfig {
     var backgroundColorHex: String
     /// Custom background image path.
     var backgroundImagePath: String?
+    /// Number of top apps to display in dashboard.
+    var topAppsLimit: Int
     
     static func load() -> BreakConfig {
         let work = Int(AppDatabase.shared.setting(for: "break_work_interval_mins") ?? "45") ?? 45
@@ -30,6 +32,7 @@ struct BreakConfig {
         let bgHex = AppDatabase.shared.setting(for: "break_background_hex") ?? "#000000"
         let bgImg = AppDatabase.shared.setting(for: "break_background_image_path")
         let lEnabled = AppDatabase.shared.setting(for: "break_long_enabled") != "false"
+        let appLimit = Int(AppDatabase.shared.setting(for: "stats_top_apps_limit") ?? "10") ?? 10
         
         return BreakConfig(
             workIntervalMins: work,
@@ -39,7 +42,8 @@ struct BreakConfig {
             isEnabledToday: disabledDay != todayStr,
             isLongBreakEnabled: lEnabled,
             backgroundColorHex: bgHex,
-            backgroundImagePath: bgImg
+            backgroundImagePath: bgImg,
+            topAppsLimit: appLimit
         )
     }
 }

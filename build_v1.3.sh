@@ -2,7 +2,7 @@
 set -e
 
 APP_NAME="SeedoMac"
-VERSION="1.5.7"
+VERSION="1.5.9"
 DMG_NAME="SeedoMac_v${VERSION}.dmg"
 BUILD_DIR="build"
 EXPORT_DIR="${BUILD_DIR}/Export"
@@ -16,7 +16,12 @@ xcodebuild clean archive \
     -project "${APP_NAME}.xcodeproj" \
     -scheme "${APP_NAME}" \
     -configuration Release \
-    -archivePath "${BUILD_DIR}/${APP_NAME}.xcarchive"
+    -archivePath "${BUILD_DIR}/${APP_NAME}.xcarchive" \
+    -derivedDataPath temp_derived_data \
+    CODE_SIGNING_ALLOWED=NO \
+    CODE_SIGNING_REQUIRED=NO \
+    CODE_SIGN_IDENTITY="" \
+    CODE_SIGN_ENTITLEMENTS=""
 
 # 2. Export App
 echo "Exporting App..."

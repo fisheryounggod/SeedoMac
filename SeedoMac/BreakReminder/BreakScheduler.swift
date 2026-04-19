@@ -18,6 +18,8 @@ final class BreakScheduler: ObservableObject {
     private var afkStartTs: Date?
     private var isBreakInProgress = false
     private var postponedOnce = false
+    @Published var isDeepFocusActive: Bool = false
+    @Published var isFocusActive: Bool = true // Enabled by default as "Normal Mode"
     
     /// Tracks how many focus sessions have been completed since the last long break.
     @Published var sessionsSinceLongBreak: Int = UserDefaults.standard.integer(forKey: "break_session_count")
@@ -84,21 +86,31 @@ final class BreakScheduler: ObservableObject {
     }
     
     private func startTimer() {
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        let t = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.tick()
         }
+        // Ensure timer keeps ticking during window dragging/scrolling
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
     
     private func tick() {
-        guard config.isEnabledToday else { return }
+        // Only tick if focus is active, tracking is on, and break isn't in progress
+        guard isFocusActive && AppState.shared.isTracking else { return }
         guard !isBreakInProgress else { return }
+        
+        // Even if disabled today from automatic break reminders, 
+        // we still track "Focus Time" for the MenuBar ring.
+        // But if enabled, we also check for break thresholds.
         
         if !isAFK {
             workElapsedSecsDetailed += 1
             
-            let threshold = Double(config.workIntervalMins * 60)
-            if workElapsedSecsDetailed >= threshold {
-                triggerBreak()
+            if config.isEnabledToday {
+                let threshold = Double(config.workIntervalMins * 60)
+                if workElapsedSecsDetailed >= threshold {
+                    triggerBreak()
+                }
             }
         }
     }
@@ -137,7 +149,7 @@ final class BreakScheduler: ObservableObject {
         // Transition to resting logic in UI
     }
     
-    func endBreak(summary: String, outcome: String, startTs: Int64, endTs: Int64) {
+    func endBreak(summary: String, categoryId: String? = nil, outcome: String, startTs: Int64, endTs: Int64) {
         // Persistence
         var session = WorkSession(
             startTs: startTs,
@@ -145,7 +157,8 @@ final class BreakScheduler: ObservableObject {
             topAppsJson: fetchTopAppsJson(start: startTs, end: endTs),
             summary: summary,
             outcome: outcome,
-            createdAt: Int64(Date().timeIntervalSince1970 * 1000)
+            createdAt: Int64(Date().timeIntervalSince1970 * 1000),
+            categoryId: categoryId
         )
         try? WorkSessionStore().insert(&session)
         NotificationCenter.default.post(name: .workSessionDidSave, object: nil)
@@ -175,8 +188,8 @@ final class BreakScheduler: ObservableObject {
         isBreakInProgress = false
     }
     
-    func skipBreak(summary: String, startTs: Int64, endTs: Int64) {
-        endBreak(summary: summary, outcome: "skipped", startTs: startTs, endTs: endTs)
+    func skipBreak(summary: String, categoryId: String? = nil, startTs: Int64, endTs: Int64) {
+        endBreak(summary: summary, categoryId: categoryId, outcome: "skipped", startTs: startTs, endTs: endTs)
     }
     
     func disableToday() {
@@ -187,7 +200,7 @@ final class BreakScheduler: ObservableObject {
         isBreakInProgress = false
     }
     
-    private func resetWork() {
+    func resetWork() {
         workElapsedSecsDetailed = 0
     }
     

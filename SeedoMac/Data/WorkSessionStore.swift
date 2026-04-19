@@ -78,8 +78,44 @@ final class WorkSessionStore {
         }
     }
 
-    // MARK: - Unified Logs
+    // MARK: - Import / Export Helpers
+    
+    func allSessions() throws -> [WorkSession] {
+        try db.read { d in try WorkSession.order(Column("start_ts").desc).fetchAll(d) }
+    }
+    
+    func allCategories() throws -> [SessionCategory] {
+        try db.read { d in try SessionCategory.order(Column("display_order").asc).fetchAll(d) }
+    }
+    
+    func bulkInsertSessions(_ sessions: [WorkSession]) throws {
+        try db.write { d in
+            for var s in sessions {
+                // Remove ID to avoid PK conflicts, let GRDB handle it
+                s.id = nil
+                try s.insert(d)
+            }
+        }
+    }
+    
+    func bulkInsertSummaries(_ summaries: [DailySummary]) throws {
+        try db.write { d in
+            for s in summaries {
+                try s.save(d) // save() handles insert or update
+            }
+        }
+    }
+    
+    func bulkInsertCategories(_ categories: [SessionCategory]) throws {
+        try db.write { d in
+            for var c in categories {
+                try c.save(d)
+            }
+        }
+    }
 
+    // MARK: - Unified Logs
+    
     /// Distinct calendar days (YYYY-MM-DD) that have sessions or summaries, newest first.
     func allLogDates() throws -> [String] {
         try db.read { d in

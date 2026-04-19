@@ -17,6 +17,8 @@ final class BreakOverlayWindowController: NSWindowController {
     private let sessionIndex: Int
     private let totalSessions: Int
     
+    private var overlayWindows: [NSWindow] = []
+    
     init(startTs: Int64, endTs: Int64, durationSecs: Double, canPostpone: Bool,
          isLongBreak: Bool, durationMins: Int, sessionIndex: Int, totalSessions: Int) {
         self.startTs = startTs
@@ -28,65 +30,85 @@ final class BreakOverlayWindowController: NSWindowController {
         self.sessionIndex = sessionIndex
         self.totalSessions = totalSessions
         
-        // Setup Window
-        let screen = NSScreen.main ?? NSScreen.screens[0]
-        let window = BreakOverlayWindow(
-            contentRect: screen.frame,
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
+        super.init(window: nil)
         
-        window.level = .screenSaver // Above everything
-        window.backgroundColor = .clear
-        window.isOpaque = false
-        window.hasShadow = false
-        window.ignoresMouseEvents = false // We WANT mouse events
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        
-        super.init(window: window)
-        
-        let contentView = BreakOverlayView(
-            startTs: startTs,
-            endTs: endTs,
-            durationSecs: durationSecs,
-            canPostpone: canPostpone,
-            isLongBreak: isLongBreak,
-            durationMins: durationMins,
-            sessionIndex: sessionIndex,
-            totalSessions: totalSessions,
-            onStartBreak: { 
-                BreakScheduler.shared.startBreak()
-            },
-            onPostpone: { [weak self] in
-                BreakScheduler.shared.postponeBreak()
-                self?.close()
-            },
-            onSkip: { [weak self] summary in
-                BreakScheduler.shared.skipBreak(summary: summary, startTs: startTs, endTs: endTs)
-                self?.close()
-            },
-            onFinishBreak: { [weak self] summary in
-                BreakScheduler.shared.endBreak(summary: summary, outcome: "completed", startTs: startTs, endTs: endTs)
-                self?.close()
-            },
-            onDisableToday: { [weak self] in
-                BreakScheduler.shared.disableToday()
-                self?.close()
-            }
-        )
-        
-        window.contentView = NSHostingView(rootView: contentView)
+        setupWindows()
     }
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
     
+    private func setupWindows() {
+        for screen in NSScreen.screens {
+            let window = BreakOverlayWindow(
+                contentRect: screen.frame,
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            
+            window.level = .screenSaver
+            window.backgroundColor = .clear
+            window.isOpaque = false
+            window.hasShadow = false
+            window.ignoresMouseEvents = false
+            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            
+            let contentView = BreakOverlayView(
+                startTs: startTs,
+                endTs: endTs,
+                durationSecs: durationSecs,
+                canPostpone: canPostpone,
+                isLongBreak: isLongBreak,
+                durationMins: durationMins,
+                sessionIndex: sessionIndex,
+                totalSessions: totalSessions,
+                onStartBreak: { 
+                    BreakScheduler.shared.startBreak()
+                },
+                onPostpone: { [weak self] in
+                    BreakScheduler.shared.postponeBreak()
+                    self?.close()
+                },
+                onSkip: { [weak self] summary, catId in
+                    BreakScheduler.shared.skipBreak(summary: summary, categoryId: catId, startTs: self?.startTs ?? 0, endTs: self?.endTs ?? 0)
+                    self?.close()
+                },
+                onFinishBreak: { [weak self] summary, catId in
+                    BreakScheduler.shared.endBreak(summary: summary, categoryId: catId, outcome: "completed", startTs: self?.startTs ?? 0, endTs: self?.endTs ?? 0)
+                    self?.close()
+                },
+                onDisableToday: { [weak self] in
+                    BreakScheduler.shared.disableToday()
+                    self?.close()
+                }
+            )
+            
+            window.contentView = NSHostingView(rootView: contentView)
+            overlayWindows.append(window)
+        }
+        
+        // Use the first window as the primary window for NSWindowController
+        if let first = overlayWindows.first {
+            self.window = first
+        }
+    }
+    
     override func showWindow(_ sender: Any?) {
-        super.showWindow(sender)
-        window?.makeKeyAndOrderFront(nil)
+        for window in overlayWindows {
+            window.center()
+            window.makeKeyAndOrderFront(nil)
+        }
         NSApp.activate(ignoringOtherApps: true)
+    }
+    
+    override func close() {
+        for window in overlayWindows {
+            window.close()
+        }
+        overlayWindows.removeAll()
+        super.close()
     }
     
     // Support ESC to postpone

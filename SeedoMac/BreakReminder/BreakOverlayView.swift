@@ -9,10 +9,12 @@ struct BreakOverlayView: View {
     
     @State private var state: OverlayState = .summary
     @State private var summary: String = ""
+    @State private var selectedCategoryId: String = "rest" // Default to rest if possible
     @State private var breakTimeLeft: Int = 0
     @State private var timer: Timer?
     @State private var topApps: [AppStat] = []
     @State private var config: BreakConfig = BreakConfig.load()
+    @State private var categories: [SessionCategory] = SessionCategory.all
     
     let startTs: Int64
     let endTs: Int64
@@ -25,8 +27,8 @@ struct BreakOverlayView: View {
     
     let onStartBreak: () -> Void
     let onPostpone: () -> Void
-    let onSkip: (String) -> Void
-    let onFinishBreak: (String) -> Void
+    let onSkip: (String, String?) -> Void
+    let onFinishBreak: (String, String?) -> Void
     let onDisableToday: () -> Void
     
     var body: some View {
@@ -106,9 +108,31 @@ struct BreakOverlayView: View {
             
             VStack(alignment: .leading, spacing: 10) {
                 Text("刚刚在做什么？").font(.headline)
+                
+                // Category Picker (Horizontal)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(categories) { cat in
+                            Button(action: { selectedCategoryId = cat.id }) {
+                                Text(cat.name)
+                                    .font(.system(size: 11, weight: .bold))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(selectedCategoryId == cat.id ? cat.color : Color.white.opacity(0.1))
+                                    .foregroundStyle(selectedCategoryId == cat.id ? .white : .white.opacity(0.8))
+                                    .cornerRadius(6)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                
                 TextEditor(text: $summary)
                     .font(.body)
                     .frame(height: 100)
+                    .foregroundStyle(.white)
+                    .padding(4)
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.3)))
                     .scrollContentBackground(.hidden)
                     .background(Color.white.opacity(0.05))
@@ -122,7 +146,7 @@ struct BreakOverlayView: View {
                 }
                 
                 Button("跳过本轮 (需填小结)") {
-                    onSkip(summary)
+                    onSkip(summary, selectedCategoryId)
                 }
                 .buttonStyle(.bordered)
                 .disabled(summary.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -169,12 +193,19 @@ struct BreakOverlayView: View {
             .onChange(of: breakTimeLeft) { val in
                 if val == 0 {
                     NSSound(named: "Glass")?.play()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        NSSound(named: "Glass")?.play()
+                    }
+                    // Automatically finish break and close overlay
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        onFinishBreak(summary, selectedCategoryId)
+                    }
                 }
             }
             
             Button("我已休息好 (完成并记录)") {
                 NSSound(named: "Glass")?.play()
-                onFinishBreak(summary)
+                onFinishBreak(summary, selectedCategoryId)
             }
             .buttonStyle(.borderedProminent)
             .tint(.green)

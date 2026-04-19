@@ -12,16 +12,33 @@ final class CalendarSyncService {
     
     /// Requests access to the calendar. Works for macOS 13 and 14+.
     func requestAccess(completion: @escaping (Bool) -> Void) {
-        if #available(macOS 14.0, *) {
-            eventStore.requestFullAccessToEvents { granted, error in
-                if let error { print("[Calendar] Access error: \(error)") }
-                completion(granted)
+        let status = EKEventStore.authorizationStatus(for: .event)
+        
+        switch status {
+        case .authorized:
+            completion(true)
+        case .notDetermined:
+            if #available(macOS 14.0, *) {
+                eventStore.requestFullAccessToEvents { granted, error in
+                    if let error { print("[Calendar] Access error: \(error)") }
+                    completion(granted)
+                }
+            } else {
+                eventStore.requestAccess(to: .event) { granted, error in
+                    if let error { print("[Calendar] Access error: \(error)") }
+                    completion(granted)
+                }
             }
-        } else {
-            eventStore.requestAccess(to: .event) { granted, error in
-                if let error { print("[Calendar] Access error: \(error)") }
-                completion(granted)
-            }
+        case .denied, .restricted:
+            print("[Calendar] Access denied or restricted.")
+            completion(false)
+        case .fullAccess:
+            completion(true)
+        case .writeOnly:
+            // For Seedo, we prefer full access to find/create our specific calendar
+            completion(true)
+        @unknown default:
+            completion(false)
         }
     }
     

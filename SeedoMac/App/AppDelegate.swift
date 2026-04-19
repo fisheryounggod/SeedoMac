@@ -15,13 +15,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var popover: NSPopover!
     private var dashboardWindowController: DashboardWindowController?
     private var afkReturnPopover: NSPopover?
-    private var deepFocusWindowController: NSWindowController?
-    let appState = AppState()
+    private var deepFocusWindows: [NSWindowController] = []
+    private var aiReviewWindowController: NSWindowController?
+    private var breakOverlayController: BreakOverlayWindowController?
+    let appState = AppState.shared
     private var tracker: ActivityTracker!
     private var refreshTimer: Timer?
     private var obsidianImportTimer: Timer?
     private var autoSummaryTimer: Timer?
-    private var breakOverlayController: BreakOverlayWindowController?
+    private var previousTrackingState: Bool = true
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         loadSettings()
@@ -69,6 +71,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.showAFKReturnPopup(start: start, end: end)
             }
         }
+
+        NotificationCenter.default.addObserver(forName: .afkThresholdReached, object: nil, queue: .main) { [weak self] note in
+            if let endTs = note.userInfo?["endTs"] as? Int64 {
+                self?.handleAFKThresholdReached(endTs: endTs)
+            }
+        }
+    }
+
+    private func handleAFKThresholdReached(endTs: Int64) {
+        // Force stop tracking in appState
+        appState.isTracking = false
+        appState.currentSessionStartMs = endTs
+        
+        // Show the AFK record popup (reusing showAFKReturnPopup logic but for threshold exit)
+        // We backward-calculate a start time or just uses current session start
+        let startTs = appState.currentSessionStartMs
+        showAFKReturnPopup(start: startTs, end: endTs)
+        
+        // Notify others
+        NotificationCenter.default.post(name: .workSessionDidSave, object: nil)
     }
     
     private func showBreakOverlay(
@@ -143,8 +165,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover.contentSize = NSSize(width: 320, height: 300)
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(
-            rootView: TodayView(appState: appState, openDashboard: { [weak self] in
-                self?.openDashboard(tab: .stats)
+            rootView: TodayView(appState: appState, openDashboard: { [weak self] tab in
+                self?.openDashboard(tab: tab)
             })
         )
     }
@@ -164,7 +186,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func scheduleUIRefresh() {
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.refreshTodayStats()
         }
         refreshTodayStats()  // immediate first load
@@ -256,6 +278,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         do {
                             try AIService.shared.persistSummary(summary)
                             print("[AutoSummary] saved for \(todayKey)")
+                            
+                            // Auto-export to Obsidian if configured
+                            if AppDatabase.shared.setting(for: "obsidian_vault_path")?.isEmpty == false {
+                                try? ObsidianImporter.shared.appendSummary(summary.content)
+                                print("[AutoSummary] exported to Obsidian")
+                            }
                         } catch {
                             print("[AutoSummary] persist failed: \(error.localizedDescription)")
                         }
@@ -297,7 +325,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             DispatchQueue.main.async {
                 self.appState.todayTotalSecs = focusSecs
-                self.appState.todayTopApps = Array(includedApps.prefix(10))
+                self.appState.todayTopApps = Array(includedApps.prefix(BreakConfig.load().topAppsLimit))
                 self.updateMenuBarIcon()
             }
         }
@@ -310,59 +338,69 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let remainingMins = max(0, (total - elapsed) / 60)
         let progress = min(1.0, Double(elapsed) / Double(total))
         
+        // Pulse effect implementation: vary scale between 0.9 and 1.1 if tracking
+        let pulseScale: CGFloat
+        if appState.isTracking {
+            // Use current second for periodic pulse (1s simple heartbeat)
+            let second = Calendar.current.component(.second, from: Date())
+            pulseScale = second % 2 == 0 ? 1.05 : 0.95
+        } else {
+            pulseScale = 1.0
+        }
+
         if let button = statusItem.button {
-            button.image = generateProgressImage(progress: progress, text: "\(remainingMins)")
+            button.image = generateProgressImage(progress: progress, text: "\(remainingMins)", scale: pulseScale)
             button.imagePosition = .imageOnly
         }
     }
 
-    private func generateProgressImage(progress: Double, text: String) -> NSImage {
+    private func generateProgressImage(progress: Double, text: String, scale: CGFloat = 1.0) -> NSImage {
         let size = NSSize(width: 22, height: 22)
-        let image = NSImage(size: size)
         
-        image.lockFocus()
-        let rect = NSRect(origin: .zero, size: size).insetBy(dx: 2, dy: 2)
-        
-        // Background circle
-        let bgPath = NSBezierPath(ovalIn: rect)
-        NSColor.secondaryLabelColor.withAlphaComponent(0.2).setStroke()
-        bgPath.lineWidth = 1.6
-        bgPath.stroke()
-        
-        // Progress arc
-        let startAngle: CGFloat = 90
-        let endAngle: CGFloat = 90 - CGFloat(progress * 360)
-        let arcPath = NSBezierPath()
-        let center = NSPoint(x: size.width/2, y: size.height/2)
-        let radius = rect.width / 2
-        
-        // Note: NSBezierPath.appendArc uses degrees and draws counter-clockwise.
-        // To draw a clockwise "sweep" for progress, we draw from endAngle to startAngle.
-        arcPath.appendArc(withCenter: center, radius: radius, startAngle: endAngle, endAngle: startAngle)
-        NSColor.systemGreen.setStroke()
-        arcPath.lineWidth = 2.0
-        arcPath.lineCapStyle = .round
-        arcPath.stroke()
-        
-        // Text
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 8, weight: .bold)
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: NSColor.labelColor
-        ]
-        
-        let textSize = text.size(withAttributes: attributes)
-        let textRect = NSRect(
-            x: (size.width - textSize.width) / 2,
-            y: (size.height - textSize.height) / 2,
-            width: textSize.width,
-            height: textSize.height
-        )
-        text.draw(in: textRect, withAttributes: attributes)
-        
-        image.unlockFocus()
-        image.isTemplate = false // Use system colors directly
-        return image
+        // Using drawingHandler for automatic White/Black mode adaptation
+        return NSImage(size: size, flipped: false) { rect in
+            let center = NSPoint(x: rect.width / 2, y: rect.height / 2)
+            let baseRect = rect.insetBy(dx: 2, dy: 2)
+            
+            // Adjust radius for pulse
+            let radius = (baseRect.width / 2) * scale
+            let pulseRect = NSRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
+
+            // 1. Background full green circle
+            let bgPath = NSBezierPath(ovalIn: pulseRect)
+            NSColor.systemGreen.withAlphaComponent(0.2).setStroke()
+            bgPath.lineWidth = 1.2
+            bgPath.stroke()
+            
+            // 2. Remaining progress arc in Red
+            let startAngle: CGFloat = 90
+            let endAngle: CGFloat = 90 - CGFloat((1.0 - progress) * 360)
+            let arcPath = NSBezierPath()
+            arcPath.appendArc(withCenter: center, radius: radius, startAngle: endAngle, endAngle: startAngle)
+            
+            NSColor.systemRed.setStroke()
+            arcPath.lineWidth = 2.0
+            arcPath.lineCapStyle = .round
+            arcPath.stroke()
+            
+            // 3. Percentage/Remaining Text
+            let font = NSFont.monospacedDigitSystemFont(ofSize: 8 * scale, weight: .bold)
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: NSColor.labelColor // Auto-adapts to menu bar theme
+            ]
+            
+            let textSize = text.size(withAttributes: attributes)
+            let textRect = NSRect(
+                x: center.x - (textSize.width / 2),
+                y: center.y - (textSize.height / 2),
+                width: textSize.width,
+                height: textSize.height
+            )
+            text.draw(in: textRect, withAttributes: attributes)
+            
+            return true
+        }
     }
 
     private func checkAccessibilityPermission() {
@@ -397,8 +435,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showContextMenu() {
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "详细统计", action: #selector(openStats), keyEquivalent: "s"))
         menu.addItem(NSMenuItem(title: "设置", action: #selector(openSettings), keyEquivalent: ";"))
+        menu.addItem(NSMenuItem(title: "详细统计", action: #selector(openStats), keyEquivalent: "s"))
         menu.addItem(NSMenuItem(title: "手动添加记录", action: #selector(addManualRecord), keyEquivalent: "n"))
         menu.addItem(NSMenuItem(title: "今日AI总结", action: #selector(todayAISummary), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "纯专注模式", action: #selector(enterDeepFocus), keyEquivalent: "d"))
@@ -423,9 +461,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSettings() {
         openDashboard(tab: .stats)
-        // Ensure settings sheet is triggered. 
-        // We'll broadcast a notification that StatsView listens to.
-        NotificationCenter.default.post(name: .shouldShowSettings, object: nil)
+        // Set AppState flag for reliable triggering
+        appState.shouldShowSettingsSheet = true
     }
 
     @objc private func addManualRecord() {
@@ -443,7 +480,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func openDashboard(tab: DashboardTab) {
         popover.performClose(nil)
-        appState.selectedTab = tab
+        
+        // Settings is a sheet over Stats, not a standalone tab in StatsView body
+        if tab == .settings {
+            appState.selectedTab = .stats
+            appState.shouldShowSettingsSheet = true
+        } else {
+            appState.selectedTab = tab
+        }
         
         if dashboardWindowController == nil {
             dashboardWindowController = DashboardWindowController(appState: appState)
@@ -454,24 +498,42 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func enterDeepFocus() {
-        if deepFocusWindowController == nil {
-            let view = DeepFocusView(appState: appState, onClose: { [weak self] in
-                self?.deepFocusWindowController?.close()
-                self?.deepFocusWindowController = nil
-            })
-            let controller = NSHostingController(rootView: view)
-            let window = KeyWindow(contentViewController: controller)
-            window.styleMask = [.borderless, .fullSizeContentView]
-            window.level = .mainMenu + 1 // High level
-            window.isOpaque = false
-            window.backgroundColor = .clear
-            
-            deepFocusWindowController = NSWindowController(window: window)
+        // 1. Save current state and pause normal tracking
+        previousTrackingState = appState.isTracking
+        appState.isTracking = false
+        appState.isDeepFocusActive = true
+        
+        if deepFocusWindows.isEmpty {
+            for screen in NSScreen.screens {
+                let isPrimary = screen == NSScreen.main
+                let view = DeepFocusView(appState: appState, onClose: { [weak self] in
+                    guard let self = self else { return }
+                    for controller in self.deepFocusWindows {
+                        controller.close()
+                    }
+                    self.deepFocusWindows.removeAll()
+                    
+                    // 2. Restore previous tracking state on exit
+                    self.appState.isDeepFocusActive = false
+                    self.appState.isTracking = self.previousTrackingState
+                }, isPrimary: isPrimary)
+                
+                let controller = NSHostingController(rootView: view)
+                let window = KeyWindow(contentViewController: controller)
+                window.styleMask = [.borderless, .fullSizeContentView]
+                window.level = .screenSaver // Absolute top level
+                window.isOpaque = false
+                window.backgroundColor = .clear
+                window.hasShadow = false
+                window.collectionBehavior = [.canJoinAllSpaces]
+                window.setFrame(screen.frame, display: true)
+                
+                let winController = NSWindowController(window: window)
+                deepFocusWindows.append(winController)
+                winController.showWindow(nil)
+            }
         }
         
-        deepFocusWindowController?.window?.setFrame(NSScreen.main?.frame ?? .zero, display: true)
-        deepFocusWindowController?.showWindow(nil)
-        deepFocusWindowController?.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -485,8 +547,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             rootView: AFKReturnView(
                 startTs: start,
                 endTs: end,
-                onSave: { [weak self] summary in
-                    self?.saveOfflineActivity(start: start, end: end, summary: summary)
+                onSave: { [weak self] (session: WorkSession) in
+                    self?.saveOfflineActivity(session: session)
                     self?.afkReturnPopover?.performClose(nil)
                 },
                 onDismiss: { [weak self] in
@@ -499,17 +561,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             afkReturnPopover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
     }
+    
+    func showTransientAISummary(context: String, label: String) {
+        // This is for manual triggers: display in window, NO SAVE to DB or Obsidian
+        DispatchQueue.main.async {
+            let view = AIReviewView(content: context, label: label, onClose: { [weak self] in
+                self?.aiReviewWindowController?.close()
+                self?.aiReviewWindowController = nil
+            })
+            
+            let controller = NSHostingController(rootView: view)
+            let window = NSWindow(contentViewController: controller)
+            window.title = "AI 深度复盘 - \(label)"
+            window.styleMask = [.titled, .closable, .resizable, .fullSizeContentView]
+            window.titlebarAppearsTransparent = true
+            window.isMovableByWindowBackground = true
+            
+            self.aiReviewWindowController = NSWindowController(window: window)
+            self.aiReviewWindowController?.showWindow(nil)
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
 
-    private func saveOfflineActivity(start: Int64, end: Int64, summary: String) {
-        var session = WorkSession(
-            startTs: start,
-            endTs: end,
-            topAppsJson: "[]",
-            summary: summary,
-            outcome: "completed",
-            createdAt: Int64(Date().timeIntervalSince1970 * 1000)
-        )
-        try? WorkSessionStore().insert(&session)
+    private func saveOfflineActivity(session: WorkSession) {
+        var mutableSession = session
+        try? WorkSessionStore().insert(&mutableSession)
         NotificationCenter.default.post(name: .workSessionDidSave, object: nil)
+    }
+
+    /// Resets the current tracking session to zero — used for 'Record and Reset'
+    func resetTracking() {
+        tracker.reset()
+        BreakScheduler.shared.resetWork() // Reset break countdown too
+        appState.currentSessionStartMs = Int64(Date().timeIntervalSince1970 * 1000)
+        refreshTodayStats()
+        updateMenuBarIcon()
     }
 }

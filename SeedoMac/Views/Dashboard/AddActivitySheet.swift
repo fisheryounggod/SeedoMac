@@ -52,20 +52,29 @@ struct AddActivitySheet: View {
                     .labelsHidden()
             }
 
-            HStack {
-                Text("类别")
-                Picker("", selection: $selectedCategoryId) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("类别").font(.system(size: 13, weight: .bold)).foregroundStyle(.secondary)
+                HStack(spacing: 8) {
                     ForEach(SessionCategory.all) { cat in
-                        Label {
-                            Text(cat.name)
-                        } icon: {
-                            Circle().fill(cat.color).frame(width: 8, height: 8)
+                        Button {
+                            selectedCategoryId = cat.id
+                        } label: {
+                            HStack(spacing: 6) {
+                                Circle().fill(cat.color).frame(width: 8, height: 8)
+                                Text(cat.name).font(.system(size: 13, weight: .medium))
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(selectedCategoryId == cat.id ? cat.color.opacity(0.15) : Color.primary.opacity(0.05))
+                            .cornerRadius(10)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(selectedCategoryId == cat.id ? cat.color.opacity(0.3) : Color.clear, lineWidth: 1)
+                            )
                         }
-                        .tag(cat.id)
+                        .buttonStyle(.plain)
                     }
                 }
-                .pickerStyle(.menu)
-                .labelsHidden()
             }
 
             HStack {
@@ -78,7 +87,14 @@ struct AddActivitySheet: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 440)
+        .frame(minWidth: 460)
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PrefillAddActivity"))) { note in
+            if let durationSecs = note.object as? Double {
+                let mins = Int(round(durationSecs / 60.0))
+                self.durationMins = max(1, mins)
+                self.startTime = Date().addingTimeInterval(-durationSecs)
+            }
+        }
     }
 
     private func save() {
