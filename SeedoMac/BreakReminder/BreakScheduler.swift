@@ -1,4 +1,4 @@
-// SeedoMac/BreakReminder/BreakScheduler.swift
+// Seedo/BreakReminder/BreakScheduler.swift
 import Foundation
 import Combine
 
@@ -24,7 +24,15 @@ final class BreakScheduler: ObservableObject {
     /// Tracks how many focus sessions have been completed since the last long break.
     @Published var sessionsSinceLongBreak: Int = UserDefaults.standard.integer(forKey: "break_session_count")
     
+    // Accumulation state for "Skip Break" logic
+    private var accumulatedWorkSecs: Double = 0
+    private var lastSkippedSummary: String = ""
+    private var lastSkippedNotes: String = ""
+    private var lastSkippedCategoryId: String? = nil
+    private var sessionStartTs: Int64?
+    
     private init() {
+        loadPersistence()
         setupObservers()
         startTimer()
     }
@@ -104,7 +112,15 @@ final class BreakScheduler: ObservableObject {
         // But if enabled, we also check for break thresholds.
         
         if !isAFK {
+            if workElapsedSecsDetailed == 0 && accumulatedWorkSecs == 0 {
+                sessionStartTs = Int64(Date().timeIntervalSince1970 * 1000)
+            }
             workElapsedSecsDetailed += 1
+            
+            // Persist every 5 seconds to avoid over-saving while keeping it responsive
+            if Int(workElapsedSecsDetailed) % 5 == 0 {
+                savePersistence()
+            }
             
             if config.isEnabledToday {
                 let threshold = Double(config.workIntervalMins * 60)
@@ -120,7 +136,8 @@ final class BreakScheduler: ObservableObject {
         isBreakInProgress = true
         
         // Prepare session draft
-        let startTs = Int64((Date().timeIntervalSince1970 - workElapsedSecsDetailed) * 1000)
+        let totalElapsed = workElapsedSecsDetailed + accumulatedWorkSecs
+        let startTs = sessionStartTs ?? Int64((Date().timeIntervalSince1970 - totalElapsed) * 1000)
         let endTs   = Int64(Date().timeIntervalSince1970 * 1000)
         
         let willBeLong = isLongBreak
@@ -133,12 +150,15 @@ final class BreakScheduler: ObservableObject {
             userInfo: [
                 "startTs": startTs,
                 "endTs": endTs,
-                "durationSecs": workElapsedSecsDetailed,
+                "durationSecs": totalElapsed,
                 "canPostpone": !postponedOnce,
                 "isLongBreak": willBeLong,
                 "durationMins": durationMins,
                 "sessionIndex": sessionsSinceLongBreak + 1,
-                "totalSessions": config.longBreakFrequency
+                "totalSessions": config.longBreakFrequency,
+                "previousSummary": lastSkippedSummary,
+                "previousNotes": lastSkippedNotes,
+                "previousCategoryId": lastSkippedCategoryId
             ]
         )
     }
@@ -149,7 +169,7 @@ final class BreakScheduler: ObservableObject {
         // Transition to resting logic in UI
     }
     
-    func endBreak(summary: String, categoryId: String? = nil, outcome: String, startTs: Int64, endTs: Int64) {
+    func endBreak(summary: String, title: String = "", categoryId: String? = nil, outcome: String, startTs: Int64, endTs: Int64) {
         // Persistence
         var session = WorkSession(
             startTs: startTs,
@@ -158,6 +178,7 @@ final class BreakScheduler: ObservableObject {
             summary: summary,
             outcome: outcome,
             createdAt: Int64(Date().timeIntervalSince1970 * 1000),
+            title: title,
             categoryId: categoryId
         )
         try? WorkSessionStore().insert(&session)
@@ -185,11 +206,21 @@ final class BreakScheduler: ObservableObject {
     func postponeBreak() {
         postponedOnce = true
         workElapsedSecsDetailed = Double((config.workIntervalMins - 5) * 60) // Back off 5 mins
+        savePersistence()
         isBreakInProgress = false
     }
     
-    func skipBreak(summary: String, categoryId: String? = nil, startTs: Int64, endTs: Int64) {
-        endBreak(summary: summary, categoryId: categoryId, outcome: "skipped", startTs: startTs, endTs: endTs)
+    func skipBreak(summary: String, title: String = "", categoryId: String? = nil, startTs: Int64, endTs: Int64) {
+        // Accumulate duration and preserve content for the next prompt
+        accumulatedWorkSecs += workElapsedSecsDetailed
+        lastSkippedSummary = summary
+        lastSkippedNotes = title
+        lastSkippedCategoryId = categoryId
+        
+        // Reset only the current interval, but keep isBreakInProgress false to resume tracking
+        workElapsedSecsDetailed = 0
+        isBreakInProgress = false
+        savePersistence()
     }
     
     func disableToday() {
@@ -202,6 +233,47 @@ final class BreakScheduler: ObservableObject {
     
     func resetWork() {
         workElapsedSecsDetailed = 0
+        accumulatedWorkSecs = 0
+        lastSkippedSummary = ""
+        lastSkippedNotes = ""
+        lastSkippedCategoryId = nil
+        sessionStartTs = nil
+        postponedOnce = false
+        clearPersistence()
+    }
+    
+    // MARK: - Persistence
+    
+    private let kElapsedKey = "focus_timer_elapsed"
+    private let kPostponedKey = "focus_timer_postponed"
+    private let kLastSavedKey = "focus_timer_last_saved"
+
+    private func savePersistence() {
+        let defaults = UserDefaults.standard
+        defaults.set(workElapsedSecsDetailed, forKey: kElapsedKey)
+        defaults.set(postponedOnce, forKey: kPostponedKey)
+        defaults.set(Int64(Date().timeIntervalSince1970), forKey: kLastSavedKey)
+    }
+    
+    private func loadPersistence() {
+        let defaults = UserDefaults.standard
+        let lastSaved = defaults.integer(forKey: kLastSavedKey)
+        let now = Int64(Date().timeIntervalSince1970)
+        
+        // Only resume if the session was active within the last 4 hours
+        // This prevents resuming a session from yesterday.
+        if lastSaved > 0 && (now - Int64(lastSaved)) < (4 * 3600) {
+            self.workElapsedSecsDetailed = defaults.double(forKey: kElapsedKey)
+            self.postponedOnce = defaults.bool(forKey: kPostponedKey)
+            print("[BreakScheduler] Recovered session: \(workElapsedSecsDetailed)s elapsed")
+        }
+    }
+    
+    private func clearPersistence() {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: kElapsedKey)
+        defaults.removeObject(forKey: kPostponedKey)
+        defaults.removeObject(forKey: kLastSavedKey)
     }
     
     private func fetchTopAppsJson(start: Int64, end: Int64) -> String {

@@ -1,4 +1,4 @@
-// SeedoMac/AI/SummaryContextBuilder.swift
+// Seedo/AI/SummaryContextBuilder.swift
 import Foundation
 
 final class SummaryContextBuilder {

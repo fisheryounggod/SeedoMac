@@ -1,4 +1,4 @@
-// SeedoMac/App/AppDelegate.swift
+// Seedo/App/AppDelegate.swift
 import AppKit
 import SwiftUI
 import KeyboardShortcuts
@@ -14,6 +14,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var dashboardWindowController: DashboardWindowController?
+    private var settingsWindowController: SettingsWindowController?
     private var afkReturnPopover: NSPopover?
     private var deepFocusWindows: [NSWindowController] = []
     private var aiReviewWindowController: NSWindowController?
@@ -39,6 +40,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         scheduleAutoDailySummary()
         checkAccessibilityPermission()
         setupShortcuts()
+        
+        NotificationService.shared.requestAuthorization { [weak self] granted in
+            if granted {
+                DispatchQueue.main.async {
+                    self?.rescheduleDailyReminders()
+                }
+            }
+        }
+        rescheduleDailyReminders()
+        
+        NotificationCenter.default.addObserver(forName: .usageReminderTriggered, object: nil, queue: .main) { _ in
+            NotificationService.shared.showUsageReminder()
+        }
     }
 
     private func setupBreakObserver() {
@@ -61,7 +75,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 isLongBreak: isLong,
                 durationMins: durMins,
                 sessionIndex: idx,
-                totalSessions: total
+                totalSessions: total,
+                initialSummary: note.userInfo?["previousSummary"] as? String ?? "",
+                initialNotes: note.userInfo?["previousNotes"] as? String ?? "",
+                initialCategoryId: note.userInfo?["previousCategoryId"] as? String
             )
         }
 
@@ -101,7 +118,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         isLongBreak: Bool,
         durationMins: Int,
         sessionIndex: Int,
-        totalSessions: Int
+        totalSessions: Int,
+        initialSummary: String = "",
+        initialNotes: String = "",
+        initialCategoryId: String? = nil
     ) {
         // Close existing if any
         breakOverlayController?.close()
@@ -114,7 +134,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             isLongBreak: isLongBreak,
             durationMins: durationMins,
             sessionIndex: sessionIndex,
-            totalSessions: totalSessions
+            totalSessions: totalSessions,
+            initialSummary: initialSummary,
+            initialNotes: initialNotes,
+            initialCategoryId: initialCategoryId
         )
         breakOverlayController?.showWindow(nil)
     }
@@ -122,6 +145,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return false
     }
+    
 
     // MARK: - Setup
 
@@ -151,6 +175,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             BreakScheduler.shared.refreshConfig()
         }
+
+        KeyboardShortcuts.onKeyDown(for: .openSettings) { [weak self] in
+            self?.showSettingsWindow()
+        }
+    }
+    
+    private func rescheduleDailyReminders() {
+        if appState.isDailyRemindersEnabled {
+            NotificationService.shared.scheduleDailyReminders(times: appState.dailyReminderTimes)
+        } else {
+            NotificationService.shared.cancelAllDailyReminders()
+        }
     }
 
     private func setupMenuBar() {
@@ -162,12 +198,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.sendAction(on: [.leftMouseDown, .rightMouseDown])
 
         popover = NSPopover()
-        popover.contentSize = NSSize(width: 320, height: 300)
+        popover.contentSize = NSSize(width: 300, height: 320)
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(
             rootView: TodayView(appState: appState, openDashboard: { [weak self] tab in
                 self?.openDashboard(tab: tab)
             })
+            .preferredColorScheme(colorScheme)
         )
     }
 
@@ -182,6 +219,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.tracker.syncSettings(from: self.appState)
             self.runObsidianImportIfEnabled()
+            self.rescheduleDailyReminders()
         }
     }
 
@@ -403,6 +441,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        checkAccessibilityPermission()
+    }
+
     private func checkAccessibilityPermission() {
         appState.hasAccessibilityPermission = WindowInfoProvider.isPermissionGranted
         if !appState.hasAccessibilityPermission {
@@ -428,18 +470,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if popover.isShown {
             popover.performClose(nil)
         } else {
+            // Re-activate app to ensure focus
+            NSApp.activate(ignoringOtherApps: true)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            // Force focus on the popover window
             popover.contentViewController?.view.window?.makeKey()
         }
     }
 
     private func showContextMenu() {
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "设置", action: #selector(openSettings), keyEquivalent: ";"))
+        menu.addItem(NSMenuItem(title: "设置", action: #selector(showSettingsWindow), keyEquivalent: ","))
         menu.addItem(NSMenuItem(title: "详细统计", action: #selector(openStats), keyEquivalent: "s"))
         menu.addItem(NSMenuItem(title: "手动添加记录", action: #selector(addManualRecord), keyEquivalent: "n"))
-        menu.addItem(NSMenuItem(title: "今日AI总结", action: #selector(todayAISummary), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "纯专注模式", action: #selector(enterDeepFocus), keyEquivalent: "d"))
+        let trackingTitle = appState.isTracking ? "暂停追踪" : "开始追踪"
+        menu.addItem(NSMenuItem(title: trackingTitle, action: #selector(toggleTracking), keyEquivalent: "p"))
+        
+        if appState.isTracking {
+            menu.addItem(NSMenuItem(title: "结束并记录", action: #selector(stopAndRecord), keyEquivalent: "r"))
+        }
+        
         menu.addItem(NSMenuItem.separator())
         
         let quitItem = NSMenuItem(title: "退出", action: #selector(quitApp), keyEquivalent: "q")
@@ -455,14 +506,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = nil // Reset so next left-click doesn't show menu
     }
 
-    @objc private func openStats() {
+    @objc func openStats() {
         openDashboard(tab: .stats)
     }
 
-    @objc private func openSettings() {
-        openDashboard(tab: .stats)
-        // Set AppState flag for reliable triggering
-        appState.shouldShowSettingsSheet = true
+    @objc func showSettingsWindow() {
+        print("[AppDelegate] Attempting to show settings window...")
+        if settingsWindowController == nil {
+            settingsWindowController = SettingsWindowController(appState: appState)
+        }
+        settingsWindowController?.showWindow(nil)
+        settingsWindowController?.window?.makeKeyAndOrderFront(nil)
+        
+        // Ensure it's visible if it was hidden
+        if let window = settingsWindowController?.window, !window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+        }
+        
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func addManualRecord() {
@@ -478,16 +539,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApplication.shared.terminate(nil)
     }
 
+    @objc private func toggleTracking() {
+        appState.isTracking.toggle()
+    }
+
+    @objc private func stopAndRecord() {
+        let duration = appState.currentDurationSecs
+        appState.isTracking = false
+        resetTracking()
+        openDashboard(tab: .stats)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            NotificationCenter.default.post(name: .shouldShowAddActivity, object: duration)
+        }
+    }
+
     private func openDashboard(tab: DashboardTab) {
         popover.performClose(nil)
         
-        // Settings is a sheet over Stats, not a standalone tab in StatsView body
         if tab == .settings {
-            appState.selectedTab = .stats
-            appState.shouldShowSettingsSheet = true
-        } else {
-            appState.selectedTab = tab
+            showSettingsWindow()
+            return
         }
+        appState.selectedTab = tab
         
         if dashboardWindowController == nil {
             dashboardWindowController = DashboardWindowController(appState: appState)
@@ -540,7 +613,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func showAFKReturnPopup(start: Int64, end: Int64) {
         if afkReturnPopover == nil {
             afkReturnPopover = NSPopover()
-            afkReturnPopover?.behavior = .transient
+            afkReturnPopover?.behavior = .applicationDefined
         }
         
         afkReturnPopover?.contentViewController = NSHostingController(
@@ -559,13 +632,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         if let button = statusItem.button {
             afkReturnPopover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            // Critical for IME and focus:
+            afkReturnPopover?.contentViewController?.view.window?.makeKey()
         }
     }
     
-    func showTransientAISummary(context: String, label: String) {
+    func showTransientAISummary(context: String, label: String, onSave: ((String) -> Void)? = nil) {
         // This is for manual triggers: display in window, NO SAVE to DB or Obsidian
         DispatchQueue.main.async {
-            let view = AIReviewView(content: context, label: label, onClose: { [weak self] in
+            let view = AIReviewView(content: context, label: label, onSave: onSave, onClose: { [weak self] in
                 self?.aiReviewWindowController?.close()
                 self?.aiReviewWindowController = nil
             })
@@ -597,5 +672,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         appState.currentSessionStartMs = Int64(Date().timeIntervalSince1970 * 1000)
         refreshTodayStats()
         updateMenuBarIcon()
+    }
+
+    private var colorScheme: ColorScheme? {
+        switch appState.appearance {
+        case "light": return .light
+        case "dark": return .dark
+        default: return nil
+        }
     }
 }

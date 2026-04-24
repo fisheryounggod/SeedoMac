@@ -1,4 +1,4 @@
-// SeedoMac/Tracker/SessionBuffer.swift
+// Seedo/Tracker/SessionBuffer.swift
 import Foundation
 
 final class SessionBuffer {

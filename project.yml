@@ -1,4 +1,4 @@
-name: SeedoMac
+name: Seedo
 options:
   bundleIdPrefix: tech.seedo
   deploymentTarget:
@@ -13,13 +13,15 @@ packages:
     url: https://github.com/sindresorhus/KeyboardShortcuts
     from: "2.0.0"
 targets:
-  SeedoMac:
+  Seedo:
     type: application
     platform: macOS
     sources:
       - path: SeedoMac
     resources:
       - path: SeedoMac/Resources
+    entitlements:
+      path: SeedoMac/Seedo.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: tech.seedo.mac
@@ -39,7 +41,7 @@ targets:
     sources:
       - path: SeedoMacTests
     dependencies:
-      - target: SeedoMac
+      - target: Seedo
     settings:
       base:
         MACOSX_DEPLOYMENT_TARGET: "14.0"

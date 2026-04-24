@@ -1,4 +1,4 @@
-// SeedoMac/Data/EventStore.swift
+// Seedo/Data/EventStore.swift
 import Foundation
 import GRDB
 

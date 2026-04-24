@@ -1,4 +1,4 @@
-// SeedoMac/Data/Models.swift
+// Seedo/Data/Models.swift
 import Foundation
 import GRDB
 

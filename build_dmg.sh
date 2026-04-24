@@ -1,44 +1,56 @@
 #!/bin/bash
 set -e
 
-APP_NAME="SeedoMac"
-VERSION="2.0.1"
-DMG_NAME="SeedoMac_v${VERSION}.dmg"
-BUILD_DIR="build"
-EXPORT_DIR="${BUILD_DIR}/Export"
+# Configuration
+APP_NAME="Seedo"
+BUNDLE_ID="tech.seedo.mac"
+PROJECT_DIR=$(pwd)
+BUILD_DIR="${PROJECT_DIR}/build"
+DMG_NAME="Seedo_v2.2.2.dmg"
+ARCHIVE_PATH="${BUILD_DIR}/${APP_NAME}.xcarchive"
+EXPORT_PATH="${BUILD_DIR}/Export"
+APP_PATH="${EXPORT_PATH}/${APP_NAME}.app"
 
-# Clean up previous build
+echo "🧹 Cleaning previous builds..."
 rm -rf "${BUILD_DIR}"
+rm -f "Seedo_v2.0.1.dmg" "Seedo_v2.0.2.dmg" "Seedo_v2.0.3.dmg" "Seedo_v2.0.4.dmg" "Seedo_v2.0.5.dmg" "Seedo_v2.0.6.dmg" "Seedo_v2.0.7.dmg" "Seedo_v2.0.8.dmg" "Seedo_v2.0.9.dmg" "Seedo_v2.1.0.dmg" "Seedo_v2.1.1.dmg" "Seedo_v2.1.2.dmg" "Seedo_v2.1.3.dmg" "Seedo_v2.1.4.dmg" "Seedo_v2.1.5.dmg" "Seedo_v2.1.6.dmg"
+mkdir -p "${BUILD_DIR}"
 
-# 1. Clean and Build
-echo "Building SeedoMac..."
-xcodebuild clean archive \
+# 1. Regenerate Project (if xcodegen exists)
+XCODEGEN=$(which xcodegen || echo "/opt/homebrew/bin/xcodegen")
+if [ -f "$XCODEGEN" ]; then
+    echo "🏗️ Regenerating project with xcodegen..."
+    $XCODEGEN generate
+else
+    echo "⚠️ xcodegen not found, skipping regeneration..."
+fi
+
+# 2. Archive
+echo "📦 Archiving ${APP_NAME}..."
+xcodebuild archive \
     -project "${APP_NAME}.xcodeproj" \
     -scheme "${APP_NAME}" \
     -configuration Release \
-    -archivePath "${BUILD_DIR}/${APP_NAME}.xcarchive" \
-    -derivedDataPath temp_derived_data \
-    CODE_SIGNING_ALLOWED=NO \
-    CODE_SIGNING_REQUIRED=NO \
-    CODE_SIGN_IDENTITY="" \
-    CODE_SIGN_ENTITLEMENTS=""
+    -archivePath "${ARCHIVE_PATH}" \
+    -derivedDataPath "${PROJECT_DIR}/temp_derived_data" \
+    CODE_SIGN_IDENTITY="-" \
+    CODE_SIGN_STYLE="Manual"
 
-# 2. Export App
-echo "Exporting App..."
-mkdir -p "${EXPORT_DIR}"
-cp -R "${BUILD_DIR}/${APP_NAME}.xcarchive/Products/Applications/${APP_NAME}.app" "${EXPORT_DIR}/"
+# 3. Export
+echo "🚀 Exporting App from Archive..."
+mkdir -p "${EXPORT_PATH}"
+cp -R "${ARCHIVE_PATH}/Products/Applications/${APP_NAME}.app" "${EXPORT_PATH}/"
 
-# 3. Create DMG
-echo "Creating DMG..."
-if [ -f "${DMG_NAME}" ]; then
-    rm "${DMG_NAME}"
-fi
+echo "✍️ Applying Ad-hoc Signing with Entitlements..."
+codesign --force --deep --sign - --entitlements "SeedoMac/Seedo.entitlements" "${APP_PATH}"
 
-DMG_STAGING="${BUILD_DIR}/DMG_Staging"
-mkdir -p "${DMG_STAGING}"
-cp -R "${EXPORT_DIR}/${APP_NAME}.app" "${DMG_STAGING}/"
-ln -s /Applications "${DMG_STAGING}/Applications"
+# 4. Create DMG
+echo "💿 Creating DMG: ${DMG_NAME}..."
+rm -f "${DMG_NAME}"
 
-hdiutil create -volname "${APP_NAME}" -srcfolder "${DMG_STAGING}" -ov -format UDZO "${DMG_NAME}"
+# Add Applications shortcut for drag-to-install
+ln -s /Applications "${EXPORT_PATH}/Applications"
 
-echo "DMG created: ${DMG_NAME}"
+hdiutil create -volname "${APP_NAME}" -srcfolder "${EXPORT_PATH}" -ov -format UDZO "${DMG_NAME}"
+
+echo "✅ Build Complete: ${DMG_NAME}"

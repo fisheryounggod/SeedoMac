@@ -1,5 +1,6 @@
-// SeedoMac/Views/Dashboard/StatsView.swift
+// Seedo/Views/Dashboard/StatsView.swift
 import SwiftUI
+import GRDB
 import Charts
 
 enum StatsPeriod: String, CaseIterable, Identifiable {
@@ -79,7 +80,7 @@ struct StatsView: View {
     @State private var editingSession: WorkSession? = nil
     @State private var sessionToDelete: WorkSession? = nil
     @State private var showingAddActivity = false
-    @State private var showingSettings = false
+
     
     // Folding & Sorting
     @State private var expandedDays: Set<String> = []
@@ -107,6 +108,10 @@ struct StatsView: View {
     // AI Analysis & Draft
     @State private var aiDraftContent: String = ""
     @State private var isSavingDraft: Bool = false
+    
+    // Historical Plan Editing
+    @State private var editingPlanDate: String? = nil
+    @State private var editingPlanText: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -117,7 +122,9 @@ struct StatsView: View {
                 Spacer()
                 
                 HStack(spacing: 8) {
-                    Button(action: { showingSettings = true }) {
+                    Button(action: { 
+                        NSApp.sendAction(#selector(AppDelegate.showSettingsWindow), to: nil, from: nil)
+                    }) {
                         Image(systemName: "gearshape")
                             .font(.system(size: 14, weight: .bold))
                             .padding(6)
@@ -225,23 +232,7 @@ struct StatsView: View {
                 onCancel: { showingAddActivity = false }
             )
         }
-        .sheet(isPresented: $showingSettings, onDismiss: {
-            appState.shouldShowSettingsSheet = false
-        }) {
-            VStack {
-                HStack {
-                    Text("设置").font(.headline)
-                    Spacer()
-                    Button("关闭") { 
-                        showingSettings = false 
-                        appState.shouldShowSettingsSheet = false
-                    }
-                }
-                .padding()
-                SettingsView(appState: appState)
-            }
-            .frame(width: 450, height: 600)
-        }
+
         .confirmationDialog(
             "确定要删除这条记录吗？",
             isPresented: Binding(
@@ -263,15 +254,34 @@ struct StatsView: View {
             loadData()
             loadAllPlans()
         }
+        .sheet(item: Binding(
+            get: { editingPlanDate != nil ? IdentifiableString(id: editingPlanDate!) : nil },
+            set: { editingPlanDate = $0?.id }
+        )) { dateItem in
+            VStack(spacing: 20) {
+                Text("编辑 \(dateItem.id) 的日度计划").font(.headline)
+                TextEditor(text: $editingPlanText)
+                    .frame(height: 100)
+                    .padding(4)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2)))
+                
+                HStack {
+                    Button("取消") { editingPlanDate = nil }
+                    Spacer()
+                    Button("保存") {
+                        savePlanForDate(dateItem.id, content: editingPlanText)
+                        editingPlanDate = nil
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding()
+            .frame(width: 350)
+        }
         .onChange(of: period) { _ in loadPeriodData() }
         .onChange(of: customStart) { _ in if period == .custom { loadPeriodData() } }
         .onChange(of: customEnd)   { _ in if period == .custom { loadPeriodData() } }
-        .onChange(of: appState.shouldShowSettingsSheet) { newValue in
-            if newValue {
-                showingSettings = true
-                appState.shouldShowSettingsSheet = false
-            }
-        }
+
         .onReceive(NotificationCenter.default.publisher(for: .shouldShowAddActivity)) { note in
             if let durationSecs = note.object as? Double {
                 // Pre-fill duration if passed in notification (from Stop & Record)
@@ -284,6 +294,27 @@ struct StatsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .shouldRunAISummary)) { _ in
             generateAISummary()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("UpdateDailySummary"))) { note in
+            if let sum = note.object as? DailySummary {
+                updateDailySummary(sum)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("DeleteDailySummary"))) { note in
+            if let date = note.object as? String {
+                deleteDailySummary(date: date)
+            }
+        }
+        .onChange(of: aiDraftContent) { newVal in
+            saveDraftToSettings(newVal)
+        }
+        .onChange(of: period) { _ in 
+            loadPeriodData()
+            loadAIDraft() // Load draft for new period
+        }
+    }
+    
+    struct IdentifiableString: Identifiable {
+        let id: String
     }
 
     // MARK: - Sections
@@ -291,12 +322,12 @@ struct StatsView: View {
     // MARK: - Unified Plan Board
     
     private var unifiedPlanBoard: some View {
-        HStack(spacing: 20) {
-            planItemCompact(title: "日度", content: dailyPlan, color: .blue)
-            Divider().frame(height: 16).opacity(0.3)
-            planItemCompact(title: "月度", content: monthlyPlan, color: .purple)
-            Divider().frame(height: 16).opacity(0.3)
-            planItemCompact(title: "年度", content: yearlyPlan, color: .orange)
+        HStack(spacing: 16) {
+            planItemCompact(title: "日度计划", content: dailyPlan, color: .blue)
+            Divider().frame(height: 30).opacity(0.3)
+            planItemCompact(title: "月度计划", content: monthlyPlan, color: .purple)
+            Divider().frame(height: 30).opacity(0.3)
+            planItemCompact(title: "年度计划", content: yearlyPlan, color: .orange)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -308,21 +339,22 @@ struct StatsView: View {
     }
     
     private func planItemCompact(title: String, content: String?, color: Color) -> some View {
-        HStack(spacing: 8) {
+        VStack(alignment: .center, spacing: 6) {
             Text(title)
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(color)
-                .padding(.horizontal, 4)
+                .padding(.horizontal, 6)
                 .padding(.vertical, 2)
-                .background(color.opacity(0.1))
+                .background(color.opacity(0.12))
                 .cornerRadius(4)
             
             Text(content?.isEmpty == false ? content!.replacingOccurrences(of: "\n", with: " ") : "未设定")
-                .font(.system(size: 13, weight: .regular, design: .rounded))
-                .lineLimit(1)
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
                 .foregroundStyle(content?.isEmpty == false ? Color.primary : Color.secondary.opacity(0.6))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
     
     private func binding(for scope: PlanScope) -> Binding<String> {
@@ -790,6 +822,24 @@ struct StatsView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Color.accentColor)
+                
+                Menu {
+                    Button(action: exportSessions) {
+                        Label("导出记录 (JSON)", systemImage: "square.and.arrow.up")
+                    }
+                    Button(action: importSessions) {
+                        Label("导入记录 (JSON)", systemImage: "square.and.arrow.down")
+                    }
+                    Button(action: runDeduplication) {
+                        Label("去重记录", systemImage: "wand.and.stars.inverse")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+                .menuStyle(.borderlessButton)
+                .frame(width: 24)
             }
             
             if historyItems.isEmpty {
@@ -825,6 +875,15 @@ struct StatsView: View {
                                     .font(.caption2.bold())
                                     .foregroundStyle(.secondary)
                                 
+                                let plan = AppDatabase.shared.exactDailyPlan(for: date)
+                                if !plan.isEmpty {
+                                    Text("日度计划：\(plan)")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.pink.opacity(0.8))
+                                        .padding(.leading, 8)
+                                        .lineLimit(1)
+                                }
+                                
                                 Spacer()
                                 
                                 if !isExpanded {
@@ -839,6 +898,15 @@ struct StatsView: View {
                             .cornerRadius(6)
                         }
                         .buttonStyle(.plain)
+                        .contextMenu {
+                            Button {
+                                let currentPlan = AppDatabase.shared.exactDailyPlan(for: date)
+                                editingPlanText = currentPlan
+                                editingPlanDate = date
+                            } label: {
+                                Label("编辑日度计划", systemImage: "pencil")
+                            }
+                        }
                         
                         if isExpanded {
                             VStack(alignment: .leading, spacing: 10) {
@@ -901,30 +969,6 @@ struct StatsView: View {
                         RoundedRectangle(cornerRadius: 12)
                             .stroke(Color.primary.opacity(0.1), lineWidth: 1)
                     )
-                
-                HStack {
-                    Text("提示：保存后将作为当天的总复盘显示在历史列表中。")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                    
-                    Spacer()
-                    
-                    Button(action: saveAIDraft) {
-                        if isSavingDraft {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Text("保存到复盘记录")
-                                .font(.system(size: 12, weight: .bold))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color.blue)
-                                .foregroundStyle(.white)
-                                .cornerRadius(8)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(aiDraftContent.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
             }
         }
     }
@@ -975,15 +1019,59 @@ struct StatsView: View {
         
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                try AIService.shared.persistSummary(sum)
+                try WorkSessionStore().saveSummary(sum)
                 DispatchQueue.main.async {
                     self.isSavingDraft = false
                     self.aiDraftContent = ""
+                    // Clear the persisted draft setting too
+                    AppDatabase.shared.saveSetting(key: "draft_review_\(dateKey)", value: "")
                     self.loadData()
                 }
             } catch {
                 print("Failed to save AI summary: \(error)")
                 DispatchQueue.main.async { self.isSavingDraft = false }
+            }
+        }
+    }
+
+    private func updateDailySummary(_ summary: DailySummary) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try WorkSessionStore().saveSummary(summary)
+                DispatchQueue.main.async { loadData() }
+            } catch {
+                print("[StatsView] Update summary failed: \(error)")
+            }
+        }
+    }
+
+    private func deleteDailySummary(date: String) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try WorkSessionStore().deleteSummary(date: date)
+                DispatchQueue.main.async { loadData() }
+            } catch {
+                print("[StatsView] Delete summary failed: \(error)")
+            }
+        }
+    }
+
+    private func saveDraftToSettings(_ content: String) {
+        // Prevent clearing legitimate content due to race conditions during initial load
+        guard !content.isEmpty || isSavingDraft else { return }
+        let key = "draft_review_\(periodKey())"
+        AppDatabase.shared.saveSetting(key: key, value: content)
+    }
+
+    private func loadAIDraft() {
+        let key = "draft_review_\(periodKey())"
+        DispatchQueue.global(qos: .userInitiated).async {
+            var content = AppDatabase.shared.setting(for: key) ?? ""
+            if content.isEmpty && period == .today {
+                content = AppDatabase.shared.latestSummary()
+            }
+            DispatchQueue.main.async {
+                self.aiDraftContent = content
             }
         }
     }
@@ -1108,7 +1196,53 @@ struct StatsView: View {
             .cornerRadius(10)
             .onTapGesture {
                 if let appDelegate = NSApp.delegate as? AppDelegate {
-                    appDelegate.showTransientAISummary(context: summary.content, label: summary.date)
+                    appDelegate.showTransientAISummary(
+                        context: summary.content,
+                        label: summary.date,
+                        onSave: { newContent in
+                            // Call parent method (via Notification or Closure)
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("UpdateDailySummary"),
+                                object: DailySummary(
+                                    date: summary.date,
+                                    content: newContent,
+                                    score: summary.score,
+                                    keywords: summary.keywords,
+                                    createdAt: summary.createdAt
+                                )
+                            )
+                        }
+                    )
+                }
+            }
+            .contextMenu {
+                Button {
+                    if let appDelegate = NSApp.delegate as? AppDelegate {
+                        appDelegate.showTransientAISummary(
+                            context: summary.content,
+                            label: summary.date,
+                            onSave: { newContent in
+                                NotificationCenter.default.post(
+                                    name: NSNotification.Name("UpdateDailySummary"),
+                                    object: DailySummary(
+                                        date: summary.date,
+                                        content: newContent,
+                                        score: summary.score,
+                                        keywords: summary.keywords,
+                                        createdAt: summary.createdAt
+                                    )
+                                )
+                            }
+                        )
+                    }
+                } label: {
+                    Label("编辑", systemImage: "pencil")
+                }
+                
+                Button(role: .destructive) {
+                    NotificationCenter.default.post(name: NSNotification.Name("DeleteDailySummary"), object: summary.date)
+                } label: {
+                    Label("删除", systemImage: "trash")
                 }
             }
         }
@@ -1226,6 +1360,15 @@ struct StatsView: View {
                     Label("复制", systemImage: "doc.on.doc")
                 }
                 
+                let vaultConfigured = !(AppDatabase.shared.setting(for: "obsidian_vault_path") ?? "").isEmpty
+                if vaultConfigured {
+                    Button {
+                        exportSessionToObsidian(session)
+                    } label: {
+                        Label("同步到 Obsidian", systemImage: "arrow.up.doc")
+                    }
+                }
+                
                 Button(role: .destructive) {
                     sessionToDelete = session
                 } label: {
@@ -1244,7 +1387,10 @@ struct StatsView: View {
                 try WorkSessionStore().insert(&s)
                 // Also sync to calendar if enabled
                 CalendarSyncService.shared.sync(session: s)
-                
+                // Auto-export to Obsidian if enabled
+                if AppDatabase.shared.setting(for: "obsidian_export_sessions") == "true" {
+                    try? ObsidianImporter.shared.appendSession(s)
+                }
                 
                 DispatchQueue.main.async {
                     loadData()
@@ -1284,6 +1430,44 @@ struct StatsView: View {
         }
     }
 
+    private func exportSessions() {
+        DataManagementService.shared.exportData { _ in }
+    }
+    
+    private func importSessions() {
+        DataManagementService.shared.importData { result in
+            if case .success = result {
+                DispatchQueue.main.async { loadData() }
+            }
+        }
+    }
+    
+    private func runDeduplication() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let count = try WorkSessionStore().deduplicate()
+                print("Deduplicated \(count) sessions")
+                DispatchQueue.main.async { loadData() }
+            } catch {
+                print("Deduplication failed: \(error)")
+            }
+        }
+    }
+
+    private func exportSessionToObsidian(_ session: WorkSession) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try ObsidianImporter.shared.appendSession(session)
+                DispatchQueue.main.async {
+                    // Brief status feedback via existing saveStatus-like pattern
+                    print("[StatsView] Exported session to Obsidian")
+                }
+            } catch {
+                print("[StatsView] Obsidian export failed: \(error)")
+            }
+        }
+    }
+
     private func duplicateSession(_ session: WorkSession) {
         var copy = session
         copy.id = nil
@@ -1311,6 +1495,7 @@ struct StatsView: View {
         loadHeatmap()
         loadPeriodData()
         loadSummary()
+        loadAIDraft() // Persistence fix
     }
 
     private func loadHeatmap() {
@@ -1375,10 +1560,9 @@ struct StatsView: View {
                         self.isLoadingAI = false
                         switch result {
                         case .success(let s):
-                            // Manual trigger: Auto-persist (upsert) to keep only one entry for today/period.
-                            // This replaces the old transient window flow.
+                            // Manual trigger: Show in the draft box below.
+                            // It will persist until edited or replaced by a new generation.
                             self.aiDraftContent = s.content
-                            self.saveAIDraft()
                         case .failure(let e): 
                             self.aiError = e.localizedDescription
                         }
@@ -1403,9 +1587,14 @@ struct StatsView: View {
         return f.string(from: date)
     }
 
+    private func getDailyPlan(for dateString: String) -> String {
+        AppDatabase.shared.dailyPlan(for: dateString)
+    }
+    
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
         return f
     }()
 
@@ -1431,9 +1620,16 @@ struct StatsView: View {
 
     private func loadAllPlans() {
         for scope in PlanScope.allCases {
-            let key = planKey(for: scope)
             DispatchQueue.global(qos: .userInitiated).async {
-                let content = AppDatabase.shared.setting(for: key) ?? ""
+                let content: String
+                if scope == .daily {
+                    let today = Self.dateFormatter.string(from: Date())
+                    content = AppDatabase.shared.dailyPlan(for: today)
+                } else {
+                    let key = self.planKey(for: scope)
+                    content = AppDatabase.shared.setting(for: key) ?? ""
+                }
+                
                 DispatchQueue.main.async {
                     switch scope {
                     case .daily: self.dailyPlan = content
@@ -1449,11 +1645,32 @@ struct StatsView: View {
         let key = planKey(for: scope)
         DispatchQueue.global(qos: .userInitiated).async {
             AppDatabase.shared.saveSetting(key: key, value: content)
-            if !silent {
-                DispatchQueue.main.async {
+            DispatchQueue.main.async {
+                if scope == .daily {
+                    AppState.shared.todayGoal = content
+                }
+                if !silent {
                     self.planStatus = "已保存 ✓"
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.planStatus = nil }
                 }
+            }
+        }
+    }
+
+    private func savePlanForDate(_ dateString: String, content: String) {
+        let key = "plan_daily:\(dateString)"
+        DispatchQueue.global(qos: .userInitiated).async {
+            AppDatabase.shared.saveSetting(key: key, value: content)
+            // If it's today, also sync to AppState
+            let today = Self.dateFormatter.string(from: Date())
+            if dateString == today {
+                DispatchQueue.main.async {
+                    self.dailyPlan = content
+                    AppState.shared.todayGoal = content
+                }
+            }
+            DispatchQueue.main.async {
+                loadData()
             }
         }
     }
@@ -1614,3 +1831,5 @@ struct PlanBoardEditorSheet: View {
         }
     }
 }
+
+// MARK: - Export Compatibility Models moved to DataManagementService.swift

@@ -1,12 +1,26 @@
-// SeedoMac/App/SeedoApp.swift
+// Seedo/App/SeedoApp.swift
 import SwiftUI
 
 @main
 struct SeedoApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
+    @ObservedObject var appState = AppState.shared
+
     var body: some Scene {
-        // No visible scenes — UI lives in NSStatusItem + NSPopover + NSWindow
-        Settings { EmptyView() }
+        Settings {
+            EmptyView()
+        }
+        .commands {
+            CommandGroup(replacing: .appSettings) { }
+        }
+    }
+    
+    private var colorScheme: ColorScheme? {
+        switch appState.appearance {
+        case "light": return .light
+        case "dark": return .dark
+        default: return nil
+        }
     }
 }

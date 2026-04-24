@@ -1,4 +1,4 @@
-// SeedoMac/Tracker/BrowserURLProvider.swift
+// Seedo/Tracker/BrowserURLProvider.swift
 import AppKit
 import ApplicationServices
 

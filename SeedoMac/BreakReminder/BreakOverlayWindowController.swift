@@ -1,4 +1,4 @@
-// SeedoMac/BreakReminder/BreakOverlayWindowController.swift
+// Seedo/BreakReminder/BreakOverlayWindowController.swift
 import AppKit
 import SwiftUI
 
@@ -17,10 +17,15 @@ final class BreakOverlayWindowController: NSWindowController {
     private let sessionIndex: Int
     private let totalSessions: Int
     
+    private let initialSummary: String
+    private let initialNotes: String
+    private let initialCategoryId: String?
+    
     private var overlayWindows: [NSWindow] = []
     
     init(startTs: Int64, endTs: Int64, durationSecs: Double, canPostpone: Bool,
-         isLongBreak: Bool, durationMins: Int, sessionIndex: Int, totalSessions: Int) {
+         isLongBreak: Bool, durationMins: Int, sessionIndex: Int, totalSessions: Int,
+         initialSummary: String = "", initialNotes: String = "", initialCategoryId: String? = nil) {
         self.startTs = startTs
         self.endTs = endTs
         self.durationSecs = durationSecs
@@ -29,6 +34,9 @@ final class BreakOverlayWindowController: NSWindowController {
         self.durationMins = durationMins
         self.sessionIndex = sessionIndex
         self.totalSessions = totalSessions
+        self.initialSummary = initialSummary
+        self.initialNotes = initialNotes
+        self.initialCategoryId = initialCategoryId
         
         super.init(window: nil)
         
@@ -64,6 +72,9 @@ final class BreakOverlayWindowController: NSWindowController {
                 durationMins: durationMins,
                 sessionIndex: sessionIndex,
                 totalSessions: totalSessions,
+                initialSummary: initialSummary,
+                initialNotes: initialNotes,
+                initialCategoryId: initialCategoryId,
                 onStartBreak: { 
                     BreakScheduler.shared.startBreak()
                 },
@@ -71,12 +82,12 @@ final class BreakOverlayWindowController: NSWindowController {
                     BreakScheduler.shared.postponeBreak()
                     self?.close()
                 },
-                onSkip: { [weak self] summary, catId in
-                    BreakScheduler.shared.skipBreak(summary: summary, categoryId: catId, startTs: self?.startTs ?? 0, endTs: self?.endTs ?? 0)
+                onSkip: { [weak self] summary, notes, catId in
+                    BreakScheduler.shared.skipBreak(summary: summary, title: notes, categoryId: catId, startTs: self?.startTs ?? 0, endTs: self?.endTs ?? 0)
                     self?.close()
                 },
-                onFinishBreak: { [weak self] summary, catId in
-                    BreakScheduler.shared.endBreak(summary: summary, categoryId: catId, outcome: "completed", startTs: self?.startTs ?? 0, endTs: self?.endTs ?? 0)
+                onFinishBreak: { [weak self] summary, notes, catId in
+                    BreakScheduler.shared.endBreak(summary: summary, title: notes, categoryId: catId, outcome: "completed", startTs: self?.startTs ?? 0, endTs: self?.endTs ?? 0)
                     self?.close()
                 },
                 onDisableToday: { [weak self] in

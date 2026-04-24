@@ -1,4 +1,4 @@
-// SeedoMac/Views/Dashboard/WorkSessionEditorSheet.swift
+// Seedo/Views/Dashboard/WorkSessionEditorSheet.swift
 import SwiftUI
 
 struct WorkSessionEditorSheet: View {
@@ -28,20 +28,20 @@ struct WorkSessionEditorSheet: View {
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("标题").font(.caption).foregroundStyle(.secondary)
-                    TextEditor(text: $session.summary)
+                    TextField("这次活动的主要总结...", text: $session.summary)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("备注").font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: $session.title)
                         .font(.body)
-                        .frame(minHeight: 80)
+                        .frame(minHeight: 100)
                         .padding(4)
                         .overlay(
                             RoundedRectangle(cornerRadius: 6)
                                 .stroke(Color.secondary.opacity(0.3))
                         )
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("备注").font(.caption).foregroundStyle(.secondary)
-                    TextField("输入具体活动或上下文", text: $session.title)
-                        .textFieldStyle(.roundedBorder)
                 }
                 
                 HStack(spacing: 20) {

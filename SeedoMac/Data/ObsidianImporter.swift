@@ -1,4 +1,4 @@
-// SeedoMac/Data/ObsidianImporter.swift
+// Seedo/Data/ObsidianImporter.swift
 import Foundation
 import GRDB
 
@@ -45,7 +45,8 @@ final class ObsidianImporter {
     struct ParsedEntry: Equatable {
         let startTs: Int64
         let durationSecs: Int64
-        let label: String
+        let title: String
+        let categoryId: String?
     }
 
     /// Parses ` - HH:MM <label>` lines. Duration = time-to-next-entry (with a
@@ -57,7 +58,9 @@ final class ObsidianImporter {
     /// - Label must contain `#log` (case-insensitive) or `#记录`
     /// - Label is everything after the first run of whitespace, with tags stripped
     func parseEntries(_ content: String, day: Date) -> [ParsedEntry] {
-        let defaultPattern = #"^\s*-\s+(\d{1,2}):(\d{2})\s+(.+?)\s*$"#
+        // User's requested pattern: - (\d\d):(\d\d) #log/(\w\w) (.*?)花了(.*?)分钟
+        // We use a slightly more flexible version for the category (\w+)
+        let defaultPattern = #"^\s*-\s+(\d{1,2}):(\d{2})\s+#log/(\w+)\s+(.*?)\s*花了\s*(\d+)\s*分钟\s*$"#
         let customPattern = AppDatabase.shared.setting(for: "obsidian_import_regex")
         let pattern = (customPattern != nil && !customPattern!.isEmpty) ? customPattern! : defaultPattern
         
@@ -70,71 +73,46 @@ final class ObsidianImporter {
 
         let cal = Calendar.current
         var dayComps = cal.dateComponents([.year, .month, .day], from: day)
+        let categories = SessionCategory.all
 
-        var raw: [(startTs: Int64, label: String)] = []
+        var out: [ParsedEntry] = []
         let range = NSRange(content.startIndex..., in: content)
         regex.enumerateMatches(in: content, range: range) { match, _, _ in
-            guard let m = match,
-                  let hRange = Range(m.range(at: 1), in: content),
+            guard let m = match, m.numberOfRanges >= 6 else { return }
+            
+            guard let hRange = Range(m.range(at: 1), in: content),
                   let mRange = Range(m.range(at: 2), in: content),
-                  let lRange = Range(m.range(at: 3), in: content),
-                  let hour = Int(content[hRange]),
-                  let minute = Int(content[mRange]),
-                  (0...23).contains(hour),
-                  (0...59).contains(minute) else { return }
-
-            let rawLabel = String(content[lRange]).trimmingCharacters(in: .whitespaces)
-            guard Self.hasLogTag(rawLabel) else { return }
+                  let catRange = Range(m.range(at: 3), in: content),
+                  let titleRange = Range(m.range(at: 4), in: content),
+                  let durRange = Range(m.range(at: 5), in: content) else { return }
+            
+            let hour = Int(content[hRange]) ?? 0
+            let minute = Int(content[mRange]) ?? 0
+            let categoryName = String(content[catRange]).trimmingCharacters(in: .whitespaces)
+            let title = String(content[titleRange]).trimmingCharacters(in: .whitespaces)
+            let durationMins = Int(content[durRange]) ?? 30
+            
+            guard (0...23).contains(hour), (0...59).contains(minute) else { return }
 
             dayComps.hour = hour
             dayComps.minute = minute
             dayComps.second = 0
             guard let date = cal.date(from: dayComps) else { return }
 
-            let cleanLabel = Self.stripLogTag(rawLabel)
-            guard !cleanLabel.isEmpty else { return }
-
-            raw.append((Int64(date.timeIntervalSince1970 * 1000), cleanLabel))
-        }
-
-        // Sort by timestamp, compute duration = next.startTs - current.startTs
-        // (last entry defaults to 30 minutes).
-        let sorted = raw.sorted { $0.startTs < $1.startTs }
-        var out: [ParsedEntry] = []
-        for (i, entry) in sorted.enumerated() {
-            let next = (i + 1 < sorted.count)
-                ? sorted[i + 1].startTs
-                : entry.startTs + 30 * 60 * 1000
-            let durSecs = max(0, (next - entry.startTs) / 1000)
+            let categoryId = categories.first { $0.name == categoryName }?.id
+            
             out.append(ParsedEntry(
-                startTs: entry.startTs,
-                durationSecs: durSecs,
-                label: entry.label
+                startTs: Int64(date.timeIntervalSince1970 * 1000),
+                durationSecs: Int64(durationMins * 60),
+                title: title,
+                categoryId: categoryId
             ))
         }
-        return out
+
+        return out.sorted { $0.startTs < $1.startTs }
     }
 
-    private static func hasLogTag(_ label: String) -> Bool {
-        let pattern = #"(?i)#log\b|#记录"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
-            return false
-        }
-        let range = NSRange(label.startIndex..., in: label)
-        return regex.firstMatch(in: label, range: range) != nil
-    }
 
-    private static func stripLogTag(_ label: String) -> String {
-        var s = label
-        if let regex = try? NSRegularExpression(pattern: #"(?i)#log\b"#, options: []) {
-            let range = NSRange(s.startIndex..., in: s)
-            s = regex.stringByReplacingMatches(in: s, range: range, withTemplate: "")
-        }
-        s = s.replacingOccurrences(of: "#记录", with: "")
-        // Collapse whitespace
-        let collapsed = s.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
-        return collapsed.trimmingCharacters(in: .whitespaces)
-    }
 
     // MARK: - Upsert
 
@@ -156,7 +134,8 @@ final class ObsidianImporter {
                 outcome: "completed",
                 createdAt: nowMs,
                 isManual: true,
-                title: entry.label
+                title: entry.title,
+                categoryId: entry.categoryId
             )
             try store.insert(&session)
             inserted += 1
@@ -198,6 +177,59 @@ final class ObsidianImporter {
             }
             handle.closeFile()
         }
+    }
+
+    /// Appends a work session record to today's Obsidian daily note.
+    /// Format: `- HH:mm #seedo Title花了X分钟，summary`
+    func appendSession(_ session: WorkSession) throws {
+        guard let vault = AppDatabase.shared.setting(for: "obsidian_vault_path"),
+              !vault.isEmpty else { return }
+
+        // Build file path for the session's start date (not necessarily today)
+        let sessionDate = Date(timeIntervalSince1970: Double(session.startTs) / 1000)
+        let df = DateFormatter()
+        df.dateFormat = "yyyyMMdd"
+        df.locale = Locale(identifier: "en_US_POSIX")
+        let filename = df.string(from: sessionDate) + ".md"
+
+        let fileURL = URL(fileURLWithPath: vault)
+            .appendingPathComponent("sources/diarys/\(filename)")
+
+        let tf = DateFormatter()
+        tf.dateFormat = "HH:mm"
+        tf.locale = Locale(identifier: "en_US_POSIX")
+        let timeStr = tf.string(from: sessionDate)
+
+        // Format duration
+        let totalMins = Int(session.durationSecs) / 60
+        let durationStr: String
+        if totalMins >= 60 {
+            let h = totalMins / 60
+            let m = totalMins % 60
+            durationStr = m > 0 ? "\(h)小时\(m)分钟" : "\(h)小时"
+        } else {
+            durationStr = "\(max(1, totalMins))分钟"
+        }
+
+        let category = SessionCategory.find(session.categoryId).name.replacingOccurrences(of: " ", with: "")
+        let title = session.title.isEmpty ? (session.summary.isEmpty ? "专注" : session.summary) : session.title
+        let summary = session.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        let summaryPart = summary.isEmpty || summary == title ? "" : summary
+
+        // Format: - HH:mm #seedo/分类 {{summary}}花了{{X}}分钟：{{Title}}
+        let line = "\n- \(timeStr) #seedo/\(category) \(summaryPart)花了\(durationStr)：\(title)"
+
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            try line.write(to: fileURL, atomically: true, encoding: .utf8)
+        } else {
+            let handle = try FileHandle(forWritingTo: fileURL)
+            handle.seekToEndOfFile()
+            if let data = line.data(using: .utf8) {
+                handle.write(data)
+            }
+            handle.closeFile()
+        }
+        print("[ObsidianImporter] Appended session to \(filename): \(line.trimmingCharacters(in: .newlines))")
     }
 
     private func existsObsidianActivity(startTs: Int64) throws -> Bool {

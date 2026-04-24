@@ -1,4 +1,4 @@
-// SeedoMac/Views/Dashboard/AddActivitySheet.swift
+// Seedo/Views/Dashboard/AddActivitySheet.swift
 import SwiftUI
 
 struct AddActivitySheet: View {
@@ -23,8 +23,14 @@ struct AddActivitySheet: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("备注").font(.caption).foregroundStyle(.secondary)
-                TextField("具体背景、原因或其他说明", text: $label)
-                    .textFieldStyle(.roundedBorder)
+                TextEditor(text: $label)
+                    .font(.body)
+                    .frame(height: 100)
+                    .padding(4)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.secondary.opacity(0.3))
+                    )
             }
 
             HStack {

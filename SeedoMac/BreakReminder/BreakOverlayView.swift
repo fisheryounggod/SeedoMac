@@ -1,4 +1,4 @@
-// SeedoMac/BreakReminder/BreakOverlayView.swift
+// Seedo/BreakReminder/BreakOverlayView.swift
 import SwiftUI
 
 struct BreakOverlayView: View {
@@ -9,6 +9,7 @@ struct BreakOverlayView: View {
     
     @State private var state: OverlayState = .summary
     @State private var summary: String = ""
+    @State private var notes: String = ""
     @State private var selectedCategoryId: String = "rest" // Default to rest if possible
     @State private var breakTimeLeft: Int = 0
     @State private var timer: Timer?
@@ -25,10 +26,15 @@ struct BreakOverlayView: View {
     let sessionIndex: Int
     let totalSessions: Int
     
+    // Previous content for skips
+    let initialSummary: String
+    let initialNotes: String
+    let initialCategoryId: String?
+    
     let onStartBreak: () -> Void
     let onPostpone: () -> Void
-    let onSkip: (String, String?) -> Void
-    let onFinishBreak: (String, String?) -> Void
+    let onSkip: (String, String, String?) -> Void
+    let onFinishBreak: (String, String, String?) -> Void
     let onDisableToday: () -> Void
     
     var body: some View {
@@ -62,6 +68,12 @@ struct BreakOverlayView: View {
             self.config = loaded
             // Use the duration passed via notification (Short vs Long)
             self.breakTimeLeft = durationMins * 60
+            
+            // Pre-fill with previous content if available
+            if !initialSummary.isEmpty { self.summary = initialSummary }
+            if !initialNotes.isEmpty { self.notes = initialNotes }
+            if let catId = initialCategoryId { self.selectedCategoryId = catId }
+            
             loadTopApps()
         }
         .onDisappear {
@@ -128,7 +140,15 @@ struct BreakOverlayView: View {
                     .padding(.vertical, 2)
                 }
                 
-                TextEditor(text: $summary)
+                TextField("这次活动的主要总结...", text: $summary)
+                    .textFieldStyle(.plain)
+                    .padding(8)
+                    .background(Color.white.opacity(0.1))
+                    .cornerRadius(8)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.3)))
+                
+                Text("备注 (Notes)").font(.headline)
+                TextEditor(text: $notes)
                     .font(.body)
                     .frame(height: 100)
                     .foregroundStyle(.white)
@@ -146,7 +166,7 @@ struct BreakOverlayView: View {
                 }
                 
                 Button("跳过本轮 (需填小结)") {
-                    onSkip(summary, selectedCategoryId)
+                    onSkip(summary, notes, selectedCategoryId)
                 }
                 .buttonStyle(.bordered)
                 .disabled(summary.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -198,14 +218,14 @@ struct BreakOverlayView: View {
                     }
                     // Automatically finish break and close overlay
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        onFinishBreak(summary, selectedCategoryId)
+                        onFinishBreak(summary, notes, selectedCategoryId)
                     }
                 }
             }
             
             Button("我已休息好 (完成并记录)") {
                 NSSound(named: "Glass")?.play()
-                onFinishBreak(summary, selectedCategoryId)
+                onFinishBreak(summary, notes, selectedCategoryId)
             }
             .buttonStyle(.borderedProminent)
             .tint(.green)

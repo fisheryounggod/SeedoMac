@@ -1,4 +1,4 @@
-// SeedoMac/Views/Dashboard/SettingsView.swift
+// Seedo/Views/Dashboard/SettingsView.swift
 import SwiftUI
 import ServiceManagement
 import AppKit
@@ -16,6 +16,7 @@ struct SettingsView: View {
     @State private var obsidianVaultPath: String = ""
     @State private var obsidianAutoImport: Bool = false
     @State private var obsidianImportRegex: String = ""
+    @State private var obsidianExportSessions: Bool = false
     @State private var obsidianImportStatus: String? = nil
     @State private var autoSummaryEnabled: Bool = false
     @State private var autoSummaryTime: Date = SettingsView.defaultAutoSummaryTime()
@@ -30,6 +31,7 @@ struct SettingsView: View {
     @State private var calendarSyncEnabled: Bool = false
     @State private var categories: [SessionCategory] = []
     @State private var topAppsLimit: Int = 10
+    @State private var appearance: String = "system"
     @State private var saveStatus: String? = nil
 
     private let providers: [(String, String, String)] = [
@@ -160,21 +162,33 @@ struct SettingsView: View {
                                 .textFieldStyle(.roundedBorder).disabled(true)
                             Button("选取") { pickObsidianVault() }
                         }
-                        Text("格式: {vault}/sources/diarys/{yyyyMMdd}.md").font(.system(size: 9)).foregroundStyle(.secondary)
+                        Text("路径格式: {vault}/sources/diarys/{yyyyMMdd}.md").font(.system(size: 9)).foregroundStyle(.secondary)
                         
                         Divider().padding(.vertical, 4)
                         
-                        Text("导出匹配正则 (可选)").font(.caption).foregroundStyle(.secondary)
-                        TextField(#"^\s*-\s+(\d{1,2}):(\d{2})\s+(.+?)\s*$"#, text: $obsidianImportRegex)
+                        // --- 导入 ---
+                        Text("导入设置").font(.caption.bold()).foregroundStyle(.secondary)
+                        Text("导入匹配正则").font(.caption).foregroundStyle(.secondary)
+                        TextField("", text: $obsidianImportRegex)
                             .textFieldStyle(.roundedBorder)
-                        Text("支持捕获组: $1=时, $2=分, $3=内容").font(.system(size: 9)).foregroundStyle(.secondary)
-
+                            .font(.system(size: 11, design: .monospaced))
+                        Text("捕获组: $1=时, $2=分, $3=内容 | 需含 #log 或 #记录 标签").font(.system(size: 9)).foregroundStyle(.secondary)
                         Toggle("自动导入今日日记", isOn: $obsidianAutoImport)
-                        Button("立即同步") { importObsidianNow() }
-                            .disabled(obsidianVaultPath.isEmpty)
-                        if let status = obsidianImportStatus {
-                            Text(status).font(.caption2).foregroundStyle(.blue)
+                        HStack {
+                            Button("立即导入") { importObsidianNow() }
+                                .disabled(obsidianVaultPath.isEmpty)
+                            if let status = obsidianImportStatus {
+                                Text(status).font(.caption2).foregroundStyle(.blue)
+                            }
                         }
+                        
+                        Divider().padding(.vertical, 4)
+                        
+                        // --- 导出 ---
+                        Text("导出设置").font(.caption.bold()).foregroundStyle(.secondary)
+                        Toggle("自动导出专注记录到日记", isOn: $obsidianExportSessions)
+                        Text("格式: - HH:mm #seedo Title花了X分钟，summary").font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
+                        Text("也可在活动历史右键菜单手动同步单条记录").font(.system(size: 9)).foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 8)
                 }
@@ -185,6 +199,66 @@ struct SettingsView: View {
                             CalendarSyncService.shared.requestAccess { if !$0 { calendarSyncEnabled = false } }
                         }
                     }
+                
+                if calendarSyncEnabled {
+                    Button(action: {
+                        CalendarSyncService.shared.forceSyncAll(days: 30)
+                        saveStatus = "正在同步过去 30 天记录..."
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { saveStatus = nil }
+                    }) {
+                        Label("立即同步过去 30 天记录", systemImage: "arrow.clockwise.icloud")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.blue)
+                    .padding(.leading, 20)
+                }
+
+                DisclosureGroup("提醒设置") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Toggle("使用设备超过 1 小时提醒开启计时", isOn: $appState.isUsageReminderEnabled)
+                        if appState.isUsageReminderEnabled {
+                            HStack {
+                                Text("提醒阈值 (分钟)")
+                                Spacer()
+                                TextField("", value: $appState.usageReminderThresholdMins, format: .number)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(width: 50)
+                                Stepper("", value: $appState.usageReminderThresholdMins, in: 10...240, step: 5)
+                            }
+                        }
+
+                        Divider()
+
+                        Toggle("定时提醒 (开启专注)", isOn: $appState.isDailyRemindersEnabled)
+                        if appState.isDailyRemindersEnabled {
+                            VStack(spacing: 8) {
+                                ForEach(Array(appState.dailyReminderTimes.enumerated()), id: \.offset) { index, _ in
+                                    HStack {
+                                        DatePicker("", selection: $appState.dailyReminderTimes[index], displayedComponents: .hourAndMinute)
+                                            .labelsHidden()
+                                        Spacer()
+                                        Button(action: { appState.dailyReminderTimes.remove(at: index) }) {
+                                            Image(systemName: "minus.circle.fill").foregroundStyle(.red)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                Button(action: {
+                                    var comps = DateComponents()
+                                    comps.hour = 9
+                                    comps.minute = 0
+                                    let newDate = Calendar.current.date(from: comps) ?? Date()
+                                    appState.dailyReminderTimes.append(newDate)
+                                }) {
+                                    Label("添加提醒时间", systemImage: "plus.circle")
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
             }
 
             // 3. UI, UX & Privacy
@@ -219,6 +293,11 @@ struct SettingsView: View {
                             Spacer()
                             KeyboardShortcuts.Recorder(for: .togglePureFocus)
                         }
+                        HStack {
+                            Text("打开设置")
+                            Spacer()
+                            KeyboardShortcuts.Recorder(for: .openSettings)
+                        }
                     }
                     .padding(.vertical, 8)
                 }
@@ -231,6 +310,17 @@ struct SettingsView: View {
                 }
                 
                 Toggle("脱敏窗口标题 (隐私模式)", isOn: $appState.isRedactTitles)
+                
+                Picker("主题模式", selection: $appearance) {
+                    Text("跟随系统").tag("system")
+                    Text("浅色模式").tag("light")
+                    Text("深色模式").tag("dark")
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: appearance) { newValue in
+                    appState.appearance = newValue
+                    saveSettings()
+                }
             }
 
             // 4. Data & Logic
@@ -256,7 +346,7 @@ struct SettingsView: View {
                 }
                 
                 Button("打开日志目录") {
-                    let logDir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0].appendingPathComponent("Logs/SeedoMac")
+                    let logDir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0].appendingPathComponent("Logs/Seedo")
                     try? FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
                     NSWorkspace.shared.open(logDir)
                 }
@@ -321,7 +411,9 @@ struct SettingsView: View {
         autostartEnabled = (SMAppService.mainApp.status == .enabled)
         obsidianVaultPath = AppDatabase.shared.setting(for: "obsidian_vault_path") ?? ""
         obsidianAutoImport = (AppDatabase.shared.setting(for: "obsidian_auto_import") == "true")
-        obsidianImportRegex = AppDatabase.shared.setting(for: "obsidian_import_regex") ?? ""
+        let defaultRegex = #"^\s*-\s+(\d{1,2}):(\d{2})\s+(.+?)\s*$"#
+        obsidianImportRegex = AppDatabase.shared.setting(for: "obsidian_import_regex") ?? defaultRegex
+        obsidianExportSessions = (AppDatabase.shared.setting(for: "obsidian_export_sessions") == "true")
         autoSummaryEnabled = (AppDatabase.shared.setting(for: "auto_summary_enabled") == "true")
         autoSummaryTime = Self.parseTimeOfDay(
             hour: AppDatabase.shared.setting(for: "auto_summary_hour"),
@@ -342,6 +434,20 @@ struct SettingsView: View {
         breakBackgroundImagePath = AppDatabase.shared.setting(for: "break_background_image_path") ?? ""
         calendarSyncEnabled = AppDatabase.shared.setting(for: "calendar_sync_enabled") == "true"
         topAppsLimit = Int(AppDatabase.shared.setting(for: "stats_top_apps_limit") ?? "10") ?? 10
+        appearance = AppDatabase.shared.setting(for: "appearance") ?? "system"
+        appState.appearance = appearance
+        
+        appState.isUsageReminderEnabled = AppDatabase.shared.setting(for: "usage_reminder_enabled") == "true"
+        appState.usageReminderThresholdMins = Int(AppDatabase.shared.setting(for: "usage_reminder_threshold_mins") ?? "60") ?? 60
+        appState.isDailyRemindersEnabled = AppDatabase.shared.setting(for: "daily_reminders_enabled") == "true"
+        
+        if let timesJson = AppDatabase.shared.setting(for: "daily_reminder_times"),
+           let data = timesJson.data(using: .utf8),
+           let dates = try? JSONDecoder().decode([Date].self, from: data) {
+            appState.dailyReminderTimes = dates
+        } else {
+            appState.dailyReminderTimes = []
+        }
 
         if let match = providers.first(where: { $0.2 == baseURL }) {
             provider = match.0
@@ -364,6 +470,7 @@ struct SettingsView: View {
         AppDatabase.shared.saveSetting(key: "obsidian_auto_import",
                                        value: obsidianAutoImport ? "true" : "false")
         AppDatabase.shared.saveSetting(key: "obsidian_import_regex", value: obsidianImportRegex)
+        AppDatabase.shared.saveSetting(key: "obsidian_export_sessions", value: obsidianExportSessions ? "true" : "false")
         AppDatabase.shared.saveSetting(key: "auto_summary_enabled",
                                        value: autoSummaryEnabled ? "true" : "false")
         let comps = Calendar.current.dateComponents([.hour, .minute], from: autoSummaryTime)
@@ -381,6 +488,15 @@ struct SettingsView: View {
         AppDatabase.shared.saveSetting(key: "break_background_image_path", value: breakBackgroundImagePath)
         AppDatabase.shared.saveSetting(key: "calendar_sync_enabled", value: calendarSyncEnabled ? "true" : "false")
         AppDatabase.shared.saveSetting(key: "stats_top_apps_limit", value: String(topAppsLimit))
+        AppDatabase.shared.saveSetting(key: "appearance", value: appearance)
+        
+        AppDatabase.shared.saveSetting(key: "usage_reminder_enabled", value: appState.isUsageReminderEnabled ? "true" : "false")
+        AppDatabase.shared.saveSetting(key: "usage_reminder_threshold_mins", value: String(appState.usageReminderThresholdMins))
+        AppDatabase.shared.saveSetting(key: "daily_reminders_enabled", value: appState.isDailyRemindersEnabled ? "true" : "false")
+        if let data = try? JSONEncoder().encode(appState.dailyReminderTimes),
+           let json = String(data: data, encoding: .utf8) {
+            AppDatabase.shared.saveSetting(key: "daily_reminder_times", value: json)
+        }
         if breakEnabledToday {
             AppDatabase.shared.saveSetting(key: "break_disabled_day", value: "")
         } else {

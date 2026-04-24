@@ -1,4 +1,4 @@
-// SeedoMac/BreakReminder/BreakConfig.swift
+// Seedo/BreakReminder/BreakConfig.swift
 import Foundation
 
 struct BreakConfig {

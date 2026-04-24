@@ -1,4 +1,4 @@
-// SeedoMac/Tracker/ActivityTracker.swift
+// Seedo/Tracker/ActivityTracker.swift
 import AppKit
 import Combine
 
@@ -17,6 +17,11 @@ final class ActivityTracker {
     private var _isTracking: Bool = true
     private var _afkThreshold: Double = 900
     private var _isRedactTitles: Bool = false
+    
+    // Usage reminder tracking
+    private var continuousActiveSecs: Double = 0
+    private var _isUsageReminderEnabled: Bool = false
+    private var _usageReminderThresholdSecs: Double = 3600
 
     init(appState: AppState,
          eventStore: EventStore = EventStore()) {
@@ -29,6 +34,9 @@ final class ActivityTracker {
         _isTracking     = appState.isTracking
         _afkThreshold   = appState.afkThresholdSecs
         _isRedactTitles = appState.isRedactTitles
+        
+        _isUsageReminderEnabled = appState.isUsageReminderEnabled
+        _usageReminderThresholdSecs = Double(appState.usageReminderThresholdMins * 60)
     }
 
     private func checkAFK() {
@@ -101,11 +109,32 @@ final class ActivityTracker {
     // MARK: - Private
 
     private func tick() {
-        guard _isTracking else { return }
+        // ALWAYS update permission status, even if tracking is off.
+        DispatchQueue.main.async { [weak self] in
+            self?.appState.hasAccessibilityPermission = WindowInfoProvider.isPermissionGranted
+        }
 
-        // AFK detection (Consolidated into checkAFK)
+        // Always check AFK to track continuous active time
         checkAFK()
-        if isAFK { return }
+
+        if isAFK {
+            continuousActiveSecs = 0 // Reset on AFK
+            return
+        }
+
+        if _isTracking {
+            continuousActiveSecs = 0 // Reset if we are already tracking focus
+        } else {
+            continuousActiveSecs += 1
+            
+            // Check for usage reminder
+            if _isUsageReminderEnabled && continuousActiveSecs >= _usageReminderThresholdSecs {
+                NotificationCenter.default.post(name: .usageReminderTriggered, object: nil)
+                continuousActiveSecs = 0 // Reset to avoid spamming
+            }
+        }
+
+        guard _isTracking else { return }
 
         // Frontmost app info
         guard let app = NSWorkspace.shared.frontmostApplication else { return }
@@ -140,7 +169,6 @@ final class ActivityTracker {
             } else {
                 self.appState.currentSessionStartMs = nowMs
             }
-            self.appState.hasAccessibilityPermission = WindowInfoProvider.isPermissionGranted
         }
     }
 
@@ -163,4 +191,5 @@ extension Notification.Name {
     static let shouldShowSettings = Notification.Name("tech.seedo.shouldShowSettings")
     static let shouldShowAddActivity = Notification.Name("tech.seedo.shouldShowAddActivity")
     static let shouldRunAISummary = Notification.Name("tech.seedo.shouldRunAISummary")
+    static let usageReminderTriggered = Notification.Name("tech.seedo.usageReminderTriggered")
 }

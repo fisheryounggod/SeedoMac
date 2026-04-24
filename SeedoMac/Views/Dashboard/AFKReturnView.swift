@@ -1,4 +1,4 @@
-// SeedoMac/Views/Dashboard/AFKReturnView.swift
+// Seedo/Views/Dashboard/AFKReturnView.swift
 import SwiftUI
 
 struct AFKReturnView: View {
@@ -10,6 +10,7 @@ struct AFKReturnView: View {
     @State private var summary: String = ""
     @State private var label: String = ""
     @State private var selectedCategoryId: String = "focus"
+    @FocusState private var isFocused: Bool
     
     private var durationMins: Int {
         Int((endTs - startTs) / 60000)
@@ -36,6 +37,7 @@ struct AFKReturnView: View {
                 Text("标题").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
                 TextField("这段时间在做什么？", text: $summary)
                     .textFieldStyle(.roundedBorder)
+                    .focused($isFocused)
             }
             
             VStack(alignment: .leading, spacing: 4) {
@@ -77,6 +79,9 @@ struct AFKReturnView: View {
         }
         .padding(16)
         .frame(width: 320)
+        .onAppear {
+            isFocused = true
+        }
     }
     
     private func save() {

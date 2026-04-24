@@ -1,4 +1,4 @@
-// SeedoMac/Data/AppDatabase.swift
+// Seedo/Data/AppDatabase.swift
 import Foundation
 import GRDB
 
@@ -171,5 +171,67 @@ final class AppDatabase {
         } catch {
             print("[AppDatabase] Failed to save setting '\(key)': \(error)")
         }
+    }
+
+    func allSettings() -> [AppSetting] {
+        do {
+            return try read { db in
+                try AppSetting.fetchAll(db)
+            }
+        } catch {
+            print("[AppDatabase] Failed to read all settings: \(error)")
+            return []
+        }
+    }
+    
+    /// Returns the daily plan ONLY if it was explicitly set for that exact date.
+    /// Used by the history list — does NOT inherit from previous days.
+    func exactDailyPlan(for dateString: String) -> String {
+        let key = "plan_daily:\(dateString)"
+        return setting(for: key) ?? ""
+    }
+
+    /// Returns the daily plan for a specific date string (yyyy-MM-dd).
+    /// If today's plan is empty, it looks back for the most recent non-empty plan.
+    func dailyPlan(for dateString: String) -> String {
+        let keyPrefix = "plan_daily:"
+        let targetKey = keyPrefix + dateString
+        
+        do {
+            return try read { db in
+                // Find latest non-empty plan BEFORE or ON this date
+                // We exclude empty strings to ensure real content is inherited
+                let sql = """
+                    SELECT value FROM settings 
+                    WHERE key LIKE '\(keyPrefix)%' 
+                    AND key <= ? 
+                    AND value != '' 
+                    ORDER BY key DESC LIMIT 1
+                """
+                let found = try String.fetchOne(db, sql: sql, arguments: [targetKey])
+                print("[AppDatabase] dailyPlan lookup for \(dateString) -> \(found ?? "nil")")
+                return found ?? ""
+            }
+        } catch {
+            print("[AppDatabase] dailyPlan lookup failed: \(error)")
+            return ""
+        }
+    }
+
+    /// Returns the content of the most recent summary record across all dates.
+    func latestSummary() -> String {
+        do {
+            return try read { db in
+                let sql = "SELECT content FROM daily_summaries ORDER BY date DESC LIMIT 1"
+                return try String.fetchOne(db, sql: sql) ?? ""
+            }
+        } catch {
+            return ""
+        }
+    }
+
+    func savePlan(date: String, content: String) {
+        let key = "plan_daily:\(date)"
+        saveSetting(key: key, value: content)
     }
 }

@@ -1,4 +1,4 @@
-// SeedoMac/Tracker/WindowInfoProvider.swift
+// Seedo/Tracker/WindowInfoProvider.swift
 import AppKit
 
 enum WindowInfoProvider {

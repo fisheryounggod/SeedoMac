@@ -1,4 +1,4 @@
-// SeedoMac/Views/Dashboard/HeatmapView.swift
+// Seedo/Views/Dashboard/HeatmapView.swift
 import SwiftUI
 
 struct HeatmapView: View {

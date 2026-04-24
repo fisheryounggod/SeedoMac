@@ -1,4 +1,4 @@
-// SeedoMac/Data/WorkSessionStore.swift
+// Seedo/Data/WorkSessionStore.swift
 import Foundation
 import GRDB
 
@@ -10,13 +10,21 @@ final class WorkSessionStore {
 
     func insert(_ session: inout WorkSession) throws {
         try db.write { d in try session.insert(d) }
+        // Sync to calendar
+        CalendarSyncService.shared.sync(session: session)
     }
 
     func update(_ session: WorkSession) throws {
         try db.write { d in try session.update(d) }
+        // Sync to calendar
+        CalendarSyncService.shared.sync(session: session)
     }
 
     func delete(id: Int64) throws {
+        // Find session first to delete from calendar
+        if let session = try db.read({ d in try WorkSession.fetchOne(d, key: id) }) {
+            CalendarSyncService.shared.delete(session: session)
+        }
         try db.write { d in try WorkSession.deleteOne(d, key: id) }
     }
 
@@ -116,6 +124,21 @@ final class WorkSessionStore {
 
     // MARK: - Unified Logs
     
+    /// Distinct calendar days (YYYY-MM-DD) that have sessions or summaries, newest first.
+    func deduplicate() throws -> Int {
+        try db.write { d in
+            try d.execute(sql: """
+                DELETE FROM work_sessions
+                WHERE id NOT IN (
+                    SELECT MIN(id)
+                    FROM work_sessions
+                    GROUP BY start_ts, end_ts, summary, category_id
+                )
+            """)
+            return d.changesCount
+        }
+    }
+
     /// Distinct calendar days (YYYY-MM-DD) that have sessions or summaries, newest first.
     func allLogDates() throws -> [String] {
         try db.read { d in

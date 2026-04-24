@@ -1,4 +1,4 @@
-// SeedoMac/AI/AIService.swift
+// Seedo/AI/AIService.swift
 import Foundation
 
 private let systemPrompt = """

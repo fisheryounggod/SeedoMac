@@ -1,4 +1,4 @@
-// SeedoMac/Views/Popover/TodayView.swift
+// Seedo/Views/Popover/TodayView.swift
 import SwiftUI
 
 struct TodayView: View {
@@ -14,17 +14,12 @@ struct TodayView: View {
             header
             Divider()
             
-            VStack(spacing: 0) {
-                breakProgressSection
-            }
-            .background(Color.primary.opacity(0.03))
+            breakProgressSection
             
             Divider()
-            currentActivity
-            Divider()
-            footer
+            todayGoalSection
         }
-        .frame(width: 300)
+        .frame(maxWidth: .infinity)
         .background(.regularMaterial)
     }
 
@@ -68,15 +63,18 @@ struct TodayView: View {
     // MARK: - Sections
 
     private var breakProgressSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .lastTextBaseline) {
                 Label("专注进度", systemImage: "timer")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 14, weight: .bold))
                 Spacer()
-                let remainingMins = max(0, Int(breakScheduler.workIntervalSecs - breakScheduler.workElapsedSecsDetailed) / 60)
-                Text("还需 \(remainingMins) 分钟休息")
-                    .font(.system(size: 10, weight: .semibold))
+                let remaining = max(0, Int(breakScheduler.workIntervalSecs - breakScheduler.workElapsedSecsDetailed))
+                let mins = remaining / 60
+                let secs = remaining % 60
+                Text("还需 \(String(format: "%02d:%02d", mins, secs)) 休息")
+                    .font(.system(size: 15, weight: .bold, design: .monospaced))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
             }
             
             let progress = min(1.0, breakScheduler.workElapsedSecsDetailed / max(1.0, breakScheduler.workIntervalSecs))
@@ -92,120 +90,107 @@ struct TodayView: View {
             .frame(height: 10)
         }
         .padding(.horizontal, 16)
-        .padding(.top, 16)
-        .padding(.bottom, 8)
+        .padding(.top, 12)
+        .padding(.bottom, 6)
     }
 
 
-    // MARK: - Current Activity
+    // MARK: - Today's Goal
+    
+    @State private var isHoveringGoal = false
+    @State private var isEditingGoal = false
+    @State private var draftGoal = ""
+    @FocusState private var goalFieldFocused: Bool
 
-    private var currentActivity: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(appState.isTracking ? Color.green.opacity(0.15) : Color.gray.opacity(0.1))
-                    .frame(width: 28, height: 28)
-                Image(systemName: appState.isTracking ? "waveform.path.ecg" : "pause.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(appState.isTracking ? .green : .gray)
-            }
-
-            if appState.isTracking && !appState.currentApp.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(appState.currentApp)
-                        .font(.system(size: 11, weight: .semibold))
-                        .lineLimit(1)
-                    Text(appState.currentTitle)
-                        .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
-                Text(formatDuration(appState.currentDurationSecs))
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            } else {
-                Text(appState.isTracking ? "正在等待活动..." : "已暂停追踪")
-                    .font(.system(size: 11))
+    private var todayGoalSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label("今日目标", systemImage: "target")
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-    }
-
-    // MARK: - Footer
-
-    private var footer: some View {
-        HStack(spacing: 12) {
-            // Pause/Play Button (Matching Rounded Square style in screenshot)
-            HStack(spacing: 8) {
-                Button(action: { appState.isTracking.toggle() }) {
-                    Image(systemName: appState.isTracking ? "pause.fill" : "play.fill")
-                        .font(.system(size: 14))
-                        .frame(width: 44, height: 44)
-                        .background(Color.primary.opacity(0.08))
-                        .cornerRadius(8)
-                }
-                .buttonStyle(.plain)
-                
-                if appState.isTracking {
-                    Button(action: {
-                        let duration = appState.currentDurationSecs
-                        appState.isTracking = false
-                        if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
-                            appDelegate.resetTracking()
-                        }
-                        openDashboard(.stats)
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            NotificationCenter.default.post(name: .shouldShowAddActivity, object: duration)
-                        }
-                    }) {
-                        Image(systemName: "stop.fill")
-                            .font(.system(size: 14))
-                            .frame(width: 44, height: 44)
-                            .background(Color.primary.opacity(0.08))
-                            .cornerRadius(8)
+                if isEditingGoal {
+                    Button("完成") {
+                        commitGoal()
                     }
                     .buttonStyle(.plain)
-                    .help("记录并重置计时")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.blue)
+                } else {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(isHoveringGoal ? .secondary : .tertiary)
                 }
             }
-
-            Spacer()
-
-            // Action Buttons
-            HStack(spacing: 12) {
-                // Stats Button
-                Button(action: { openDashboard(.stats) }) {
-                    Text("统计")
-                        .font(.system(size: 13, weight: .semibold))
-                        .padding(.horizontal, 16)
-                        .frame(height: 44)
-                        .background(Color.primary.opacity(0.08))
-                        .foregroundStyle(.primary)
-                        .cornerRadius(8)
-                }
-                .buttonStyle(.plain)
-                
-                // Settings Button
-                Button(action: { openDashboard(.settings) }) {
-                    Text("设置")
-                        .font(.system(size: 13, weight: .semibold))
-                        .padding(.horizontal, 16)
-                        .frame(height: 44)
-                        .background(Color.primary.opacity(0.08))
-                        .foregroundStyle(.primary)
-                        .cornerRadius(8)
-                }
-                .buttonStyle(.plain)
+            
+            if isEditingGoal {
+                TextField("输入今日目标...", text: $draftGoal, axis: .vertical)
+                    .font(.system(size: 12))
+                    .textFieldStyle(.plain)
+                    .lineLimit(3...5)
+                    .focused($goalFieldFocused)
+                    .onSubmit { commitGoal() }
+                    .onExitCommand { cancelGoal() }
+                    .padding(8)
+                    .background(Color.primary.opacity(0.06))
+                    .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.accentColor.opacity(0.5), lineWidth: 1)
+                    )
+            } else {
+                Text(appState.todayGoal.isEmpty ? "点击编辑今日目标..." : appState.todayGoal)
+                    .font(.system(size: 12))
+                    .foregroundStyle(appState.todayGoal.isEmpty ? .tertiary : .primary)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.top, 8)
+        .padding(.bottom, 14)
+        .background(isHoveringGoal && !isEditingGoal ? Color.primary.opacity(0.04) : Color.clear)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            isHoveringGoal = hovering
+        }
+        .onTapGesture {
+            if !isEditingGoal {
+                startEditing()
+            }
+        }
+        .animation(.easeInOut(duration: 0.15), value: isEditingGoal)
+    }
+    
+    private func startEditing() {
+        draftGoal = appState.todayGoal
+        isEditingGoal = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            goalFieldFocused = true
+        }
+    }
+    
+    private func commitGoal() {
+        let trimmed = draftGoal.trimmingCharacters(in: .whitespacesAndNewlines)
+        appState.todayGoal = trimmed
+        
+        // Persist to database
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        df.locale = Locale(identifier: "en_US_POSIX")
+        let todayKey = "plan_daily:\(df.string(from: Date()))"
+        AppDatabase.shared.saveSetting(key: todayKey, value: trimmed)
+        print("[TodayView] Saved goal '\(trimmed)' to key '\(todayKey)'")
+        
+        isEditingGoal = false
+        goalFieldFocused = false
+    }
+    
+    private func cancelGoal() {
+        isEditingGoal = false
+        goalFieldFocused = false
+        draftGoal = ""
     }
 }
-
-
-

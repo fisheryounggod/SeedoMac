@@ -1,6 +1,8 @@
 # Xcode Generated
 SeedoMac.xcodeproj/
+Seedo.xcodeproj/
 SeedoMac.xcodeproj/project.xcworkspace/
+Seedo.xcodeproj/project.xcworkspace/
 *.xcuserstate
 xcuserdata/
 DerivedData/
@@ -29,3 +31,5 @@ build_log.txt
 # macOS
 .DS_Store
 *.DS_Store
+temp_derived_data/
+

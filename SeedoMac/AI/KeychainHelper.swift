@@ -1,4 +1,4 @@
-// SeedoMac/AI/KeychainHelper.swift
+// Seedo/AI/KeychainHelper.swift
 import Foundation
 import Security
 
