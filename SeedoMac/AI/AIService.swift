@@ -2,20 +2,27 @@
 import Foundation
 
 private let systemPrompt = """
-你是一位严谨的个人效能教练。
-任务：请根据我提供的时间统计数据和目标计划，生成一份“深度工作复盘报告”。
+你是效能复盘专家。根据用户数据生成深度工作复盘报告。严格用 Markdown 输出，不解释，不废话：
+  ## 工具磨刀时间
+  量化非核心行为耗时
 
-要求及输出格式：
-1. **工具磨刀时间（非核心产出）**：量化计算非生产性行为（社交、杂务等）。
-2. **核心产出时间**：量化计算与核心目标相关的行为。
-3. **效能比率**：计算核心产出占总时长的比例，并给出改进建议。
-4. **痛点发现**：识别碎片化、工具沉迷、无效维护等效能杀手。
-5. **明明日前三专注块建议**：基于最小阻力原则，给出具体的时间块与任务建议。
+  ## 核心产出时间
+  量化核心目标产出
 
-请确保回复专业、透彻、直击痛点。
-在回复的最后，请严格按照以下格式提供评分和关键词，以便系统解析：
-SCORE: X (1-5分)
-KEYWORDS: 关键词1, 关键词2, 关键词3
+  ## 效能比率
+  核心时间占比 + 一句评价
+
+  ## 效能痛点
+  列出主要低效原因
+
+  ## 目标进度
+  ✅/❌ 对比计划完成度
+
+  ## 明日前三专注块
+  09:00-10:30 | 90m | 任务名（最小阻力原则）
+  ---
+SCORE: X
+KEYWORDS: 关键字1, 关键字2, 关键字3
 """
 
 final class AIService {
@@ -41,19 +48,25 @@ final class AIService {
         }
 
         let systemPrompt = """
-你正在为寻求极致效能的专业人士提供工作复盘。
-请根据数据生成一份“深度工作复盘报告”，包含以下模块，并使用 Markdown 格式：
+你是效能复盘专家。根据用户数据生成深度工作复盘报告。严格用 Markdown 输出，不解释，不废话：
+  ## 工具磨刀时间
+  量化非核心行为耗时
 
-- **工具磨刀时间（非核心产出）**：量化低效能行为。
-- **核心产出时间**：量化核心目标产出。
-- **效能比率**：核心时间占比及评价。
-- **效能痛点**：如碎片化过高、工具沉迷、无效维护等。
-- **目标进度**：对比计划，列举完成度（使用 ✅/❌ 引导）。
-- **明日前三专注块建议（最小阻力原则）**：给出具体的时间点、时长和任务（如 09:00-10:30 | 90m | 任务名）。
+  ## 核心产出时间
+  量化核心目标产出
 
-规则：
-1. 语气严谨、专业、不啰嗦。
-2. 最后务必附带以下解析行：
+  ## 效能比率
+  核心时间占比 + 一句评价
+
+  ## 效能痛点
+  列出主要低效原因
+
+  ## 目标进度
+  ✅/❌ 对比计划完成度
+
+  ## 明日前三专注块
+  09:00-10:30 | 90m | 任务名（最小阻力原则）
+  ---
 SCORE: X
 KEYWORDS: 关键字1, 关键字2, 关键字3
 """
@@ -94,6 +107,81 @@ KEYWORDS: 关键字1, 关键字2, 关键字3
             let summary = self.parseSummary(date: context.dateRange, content: content)
             completion(.success(summary))
         }.resume()
+    }
+
+    /// Generates Top 3 prioritized tasks based on context.
+    func generateCoachTasks(
+        context: SummaryContext,
+        completion: @escaping (Result<[String], Error>) -> Void
+    ) {
+        guard let apiKey = KeychainHelper.loadAPIKey(), !apiKey.isEmpty else {
+            completion(.failure(AIError.noAPIKey))
+            return
+        }
+
+        let systemPrompt = """
+        你是效能教练。你的任务是分析用户的长期愿景、月度计划、今日目标以及当下的实际执行情况，为用户生成当下最值得投入的 Top 3 任务。原则：最小阻力、核心产出、直击执行痛点。
+        规则：
+        1. 必须针对性强，能直击当前的执行痛点。
+        2. 任务描述要具体、可操作。
+        3. 请严格按照以下格式输出 3 个任务，控制字数5~8个汉字，不要解释，每个任务一行：
+        TASK: 任务描述1
+        TASK: 任务描述2
+        TASK: 任务描述3
+        """
+        
+        let userContent = buildPrompt(context: context, periodLabel: "当前执行力分析")
+        let body: [String: Any] = [
+            "model": model,
+            "stream": false,
+            "messages": [
+                ["role": "system", "content": systemPrompt],
+                ["role": "user",   "content": userContent],
+            ]
+        ]
+        
+        guard let url = URL(string: "\(baseURL)/chat/completions"),
+              let bodyData = try? JSONSerialization.data(withJSONObject: body) else {
+            completion(.failure(AIError.invalidConfig))
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = bodyData
+        request.timeoutInterval = 30
+
+        URLSession.shared.dataTask(with: request) { data, _, error in
+            if let error {
+                completion(.failure(error)); return
+            }
+            guard let data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = json["choices"] as? [[String: Any]],
+                  let message = choices.first?["message"] as? [String: Any],
+                  let content = message["content"] as? String else {
+                completion(.failure(AIError.badResponse)); return
+            }
+            
+            let tasks = self.parseCoachTasks(content: content)
+            completion(.success(tasks))
+        }.resume()
+    }
+
+    private func parseCoachTasks(content: String) -> [String] {
+        var tasks: [String] = []
+        for line in content.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("TASK:") {
+                let task = trimmed.dropFirst(5).trimmingCharacters(in: .whitespaces)
+                if !task.isEmpty {
+                    tasks.append(task)
+                }
+            }
+        }
+        return Array(tasks.prefix(3))
     }
 
     /// Persists a summary (overwriting any existing row with the same date/periodKey)

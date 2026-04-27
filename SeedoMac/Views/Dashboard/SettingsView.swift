@@ -32,6 +32,10 @@ struct SettingsView: View {
     @State private var categories: [SessionCategory] = []
     @State private var topAppsLimit: Int = 10
     @State private var appearance: String = "system"
+    @State private var enableMacFocusMode: Bool = false
+    @State private var autoExportEnabled: Bool = false
+    @State private var autoExportInterval: Int = 24
+    @State private var autoExportPath: String = ""
     @State private var saveStatus: String? = nil
 
     private let providers: [(String, String, String)] = [
@@ -52,6 +56,9 @@ struct SettingsView: View {
                     .onChange(of: breakEnabledToday) { _ in
                         saveSettings()
                     }
+
+                Toggle("开启专注时同步系统专注模式 (DND)", isOn: $enableMacFocusMode)
+                    .help("在专注时间（包含 Deep Focus）自动打开系统勿扰模式，并在休息时间自动恢复")
 
                 HStack {
                     Text("专注间隔 / 分")
@@ -383,6 +390,33 @@ struct SettingsView: View {
                                 Label("导入备份 (JSON)", systemImage: "square.and.arrow.down")
                             }
                         }
+                        
+                        Divider().padding(.vertical, 4)
+                        
+                        Text("定时备份").font(.caption.bold()).foregroundStyle(.secondary)
+                        Toggle("启用定时自动备份", isOn: $autoExportEnabled)
+                        
+                        if autoExportEnabled {
+                            HStack {
+                                Text("备份频率")
+                                Spacer()
+                                Picker("", selection: $autoExportInterval) {
+                                    Text("每 1 小时").tag(1)
+                                    Text("每 6 小时").tag(6)
+                                    Text("每 12 小时").tag(12)
+                                    Text("每 24 小时").tag(24)
+                                }
+                                .labelsHidden()
+                                .fixedSize()
+                            }
+                            
+                            HStack {
+                                TextField("备份目录", text: $autoExportPath)
+                                    .textFieldStyle(.roundedBorder).disabled(true)
+                                Button("选取目录") { pickAutoExportFolder() }
+                            }
+                            Text("备份文件将以 SeedoAutoBackup_yyyyMMdd_HHmm.json 格式保存").font(.system(size: 9)).foregroundStyle(.secondary)
+                        }
                     }
                     .padding(.vertical, 8)
                 }
@@ -437,6 +471,11 @@ struct SettingsView: View {
         appearance = AppDatabase.shared.setting(for: "appearance") ?? "system"
         appState.appearance = appearance
         
+        enableMacFocusMode = AppDatabase.shared.setting(for: "mac_focus_mode_enabled") == "true"
+        autoExportEnabled = AppDatabase.shared.setting(for: "auto_export_enabled") == "true"
+        autoExportInterval = Int(AppDatabase.shared.setting(for: "auto_export_interval_hours") ?? "24") ?? 24
+        autoExportPath = AppDatabase.shared.setting(for: "auto_export_path") ?? ""
+        
         appState.isUsageReminderEnabled = AppDatabase.shared.setting(for: "usage_reminder_enabled") == "true"
         appState.usageReminderThresholdMins = Int(AppDatabase.shared.setting(for: "usage_reminder_threshold_mins") ?? "60") ?? 60
         appState.isDailyRemindersEnabled = AppDatabase.shared.setting(for: "daily_reminders_enabled") == "true"
@@ -489,6 +528,16 @@ struct SettingsView: View {
         AppDatabase.shared.saveSetting(key: "calendar_sync_enabled", value: calendarSyncEnabled ? "true" : "false")
         AppDatabase.shared.saveSetting(key: "stats_top_apps_limit", value: String(topAppsLimit))
         AppDatabase.shared.saveSetting(key: "appearance", value: appearance)
+        
+        AppDatabase.shared.saveSetting(key: "mac_focus_mode_enabled", value: enableMacFocusMode ? "true" : "false")
+        AppDatabase.shared.saveSetting(key: "auto_export_enabled", value: autoExportEnabled ? "true" : "false")
+        AppDatabase.shared.saveSetting(key: "auto_export_interval_hours", value: String(autoExportInterval))
+        AppDatabase.shared.saveSetting(key: "auto_export_path", value: autoExportPath)
+        
+        appState.isMacFocusModeEnabled = enableMacFocusMode
+        appState.isAutoExportEnabled = autoExportEnabled
+        appState.autoExportIntervalHours = autoExportInterval
+        appState.autoExportPath = autoExportPath
         
         AppDatabase.shared.saveSetting(key: "usage_reminder_enabled", value: appState.isUsageReminderEnabled ? "true" : "false")
         AppDatabase.shared.saveSetting(key: "usage_reminder_threshold_mins", value: String(appState.usageReminderThresholdMins))
@@ -688,5 +737,27 @@ struct SettingsView: View {
             refreshCategories()
             NotificationCenter.default.post(name: .settingsDidSave, object: nil)
         } catch { print("Failed to move categories: \(error)") }
+    }
+
+    private func pickAutoExportFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "选择自动备份保存目录"
+        
+        if panel.runModal() == .OK, let url = panel.url {
+            autoExportPath = url.path
+            
+            // Create security bookmark for persistence
+            do {
+                let bookmarkData = try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+                let bookmarkBase64 = bookmarkData.base64EncodedString()
+                AppDatabase.shared.saveSetting(key: "auto_export_bookmark", value: bookmarkBase64)
+                appState.autoExportBookmark = bookmarkData
+            } catch {
+                print("[Settings] Failed to create bookmark: \(error)")
+            }
+        }
     }
 }

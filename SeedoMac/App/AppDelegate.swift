@@ -49,6 +49,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         rescheduleDailyReminders()
+
+        // Init Auto Export & Focus Mode
+        _ = AutoExportService.shared
+        _ = FocusModeService.shared
         
         NotificationCenter.default.addObserver(forName: .usageReminderTriggered, object: nil, queue: .main) { _ in
             NotificationService.shared.showUsageReminder()

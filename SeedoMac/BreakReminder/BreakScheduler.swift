@@ -16,7 +16,7 @@ final class BreakScheduler: ObservableObject {
     private var timer: Timer?
     private var isAFK = false
     private var afkStartTs: Date?
-    private var isBreakInProgress = false
+    @Published var isBreakInProgress = false
     private var postponedOnce = false
     @Published var isDeepFocusActive: Bool = false
     @Published var isFocusActive: Bool = true // Enabled by default as "Normal Mode"

@@ -18,6 +18,10 @@ struct TodayView: View {
             
             Divider()
             todayGoalSection
+            
+            Divider()
+            
+            aiCoachSection
         }
         .frame(maxWidth: .infinity)
         .background(.regularMaterial)
@@ -63,35 +67,53 @@ struct TodayView: View {
     // MARK: - Sections
 
     private var breakProgressSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .lastTextBaseline) {
-                Label("专注进度", systemImage: "timer")
-                    .font(.system(size: 14, weight: .bold))
-                Spacer()
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center) {
                 let remaining = max(0, Int(breakScheduler.workIntervalSecs - breakScheduler.workElapsedSecsDetailed))
                 let mins = remaining / 60
                 let secs = remaining % 60
-                Text("还需 \(String(format: "%02d:%02d", mins, secs)) 休息")
-                    .font(.system(size: 15, weight: .bold, design: .monospaced))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(format: "%02d:%02d", mins, secs))
+                        .font(.system(size: 28, weight: .bold, design: .monospaced))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                    
+                    Text(appState.isTracking ? "正在专注..." : "已暂停")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(appState.isTracking ? .green : .orange)
+                }
+                
+                Spacer()
+                
+                Image(systemName: appState.isTracking ? "pause.fill" : "play.fill")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 40, height: 40)
+                    .background(Color.primary.opacity(0.05))
+                    .clipShape(Circle())
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                appState.isTracking.toggle()
+                // Provide haptic feedback if possible, or just log
+                print("[TodayView] Toggled tracking: \(appState.isTracking)")
             }
             
             let progress = min(1.0, breakScheduler.workElapsedSecsDetailed / max(1.0, breakScheduler.workIntervalSecs))
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 6)
+                    RoundedRectangle(cornerRadius: 4)
                         .fill(Color.primary.opacity(0.05))
-                    RoundedRectangle(cornerRadius: 6)
+                    RoundedRectangle(cornerRadius: 4)
                         .fill(LinearGradient(colors: [.green.opacity(0.8), .green], startPoint: .leading, endPoint: .trailing))
                         .frame(width: geo.size.width * progress)
                 }
             }
-            .frame(height: 10)
+            .frame(height: 6)
         }
         .padding(.horizontal, 16)
-        .padding(.top, 12)
-        .padding(.bottom, 6)
+        .padding(.vertical, 14)
     }
 
 
@@ -162,6 +184,99 @@ struct TodayView: View {
             }
         }
         .animation(.easeInOut(duration: 0.15), value: isEditingGoal)
+    }
+    
+    @State private var isRefreshingCoach = false
+    @State private var coachError: String? = nil
+
+    private var aiCoachSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label("执行力教练", systemImage: "sparkles")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if isRefreshingCoach {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Button {
+                        refreshCoachTasks()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            
+            if let error = coachError {
+                Text(error)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.red)
+            } else if appState.aiCoachTasks.isEmpty {
+                Text("点击刷新由 AI 生成今日优先建议")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(appState.aiCoachTasks, id: \.self) { task in
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: "circle.fill")
+                                .font(.system(size: 5))
+                                .padding(.top, 5)
+                                .foregroundStyle(.blue.opacity(0.7))
+                            Text(task)
+                                .font(.system(size: 12))
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+        .padding(.bottom, 16)
+    }
+
+    private func refreshCoachTasks() {
+        isRefreshingCoach = true
+        coachError = nil
+        
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        df.locale = Locale(identifier: "en_US_POSIX")
+        let todayStr = df.string(from: Date())
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let context = try SummaryContextBuilder().build(for: todayStr)
+                
+                AIService.shared.generateCoachTasks(context: context) { result in
+                    DispatchQueue.main.async {
+                        isRefreshingCoach = false
+                        switch result {
+                        case .success(let tasks):
+                            self.appState.aiCoachTasks = tasks
+                            // Persist
+                            if let data = try? JSONEncoder().encode(tasks),
+                               let json = String(data: data, encoding: .utf8) {
+                                AppDatabase.shared.saveSetting(key: "ai_coach_tasks:\(todayStr)", value: json)
+                            }
+                        case .failure(let error):
+                            self.coachError = error.localizedDescription
+                        }
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    isRefreshingCoach = false
+                    self.coachError = "构建上下文失败"
+                }
+            }
+        }
     }
     
     private func startEditing() {

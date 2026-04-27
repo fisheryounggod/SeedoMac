@@ -29,6 +29,50 @@ final class DataManagementService {
     private let store = WorkSessionStore()
     
     func exportData(completion: @escaping (Result<URL, Error>) -> Void) {
+        generateExportData { result in
+            switch result {
+            case .success(let data):
+                DispatchQueue.main.async {
+                    let panel = NSSavePanel()
+                    panel.allowedContentTypes = [.json]
+                    panel.nameFieldStringValue = "SeedoBackup_\(self.dateString(Date())).json"
+                    panel.message = "导出 Seedo 数据备份"
+                    
+                    if panel.runModal() == .OK, let url = panel.url {
+                        do {
+                            try data.write(to: url)
+                            completion(.success(url))
+                        } catch {
+                            completion(.failure(error))
+                        }
+                    }
+                }
+            case .failure(let error):
+                completion(.failure(error))
+            }
+        }
+    }
+    
+    /// Performs a silent export to a specified URL without showing any UI panels.
+    func performSilentExport(to url: URL, completion: @escaping (Result<URL, Error>) -> Void) {
+        generateExportData { result in
+            switch result {
+            case .success(let data):
+                do {
+                    // Ensure the filename is included
+                    let fileURL = url.appendingPathComponent("SeedoAutoBackup_\(self.dateString(Date())).json")
+                    try data.write(to: fileURL)
+                    completion(.success(fileURL))
+                } catch {
+                    completion(.failure(error))
+                }
+            case .failure(let error):
+                completion(.failure(error))
+            }
+        }
+    }
+    
+    private func generateExportData(completion: @escaping (Result<Data, Error>) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 let sessions = try self.store.allSessions()
@@ -59,22 +103,7 @@ final class DataManagementService {
                 encoder.outputFormatting = .prettyPrinted
                 encoder.dateEncodingStrategy = .iso8601
                 let data = try encoder.encode(backup)
-                
-                DispatchQueue.main.async {
-                    let panel = NSSavePanel()
-                    panel.allowedContentTypes = [.json]
-                    panel.nameFieldStringValue = "SeedoBackup_\(self.dateString(Date())).json"
-                    panel.message = "导出 Seedo 数据备份"
-                    
-                    if panel.runModal() == .OK, let url = panel.url {
-                        do {
-                            try data.write(to: url)
-                            completion(.success(url))
-                        } catch {
-                            completion(.failure(error))
-                        }
-                    }
-                }
+                completion(.success(data))
             } catch {
                 completion(.failure(error))
             }

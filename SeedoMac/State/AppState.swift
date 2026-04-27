@@ -29,6 +29,16 @@ final class AppState: ObservableObject {
     @Published var isRedactTitles: Bool = false
     @Published var appearance: String = "system"   // system, light, dark
     @Published var todayGoal: String = ""
+    @Published var aiCoachTasks: [String] = []
+
+    // Auto Export
+    @Published var isAutoExportEnabled: Bool = false
+    @Published var autoExportIntervalHours: Int = 24
+    @Published var autoExportPath: String = ""
+    @Published var autoExportBookmark: Data? = nil
+    
+    // Focus Mode
+    @Published var isMacFocusModeEnabled: Bool = false
 
     // Reminders
     @Published var isUsageReminderEnabled: Bool = false
@@ -43,13 +53,31 @@ final class AppState: ObservableObject {
         self.isRedactTitles = AppDatabase.shared.setting(for: "redact_titles") == "true"
         self.appearance = AppDatabase.shared.setting(for: "appearance") ?? "system"
         
+        // Load Auto Export
+        self.isAutoExportEnabled = AppDatabase.shared.setting(for: "auto_export_enabled") == "true"
+        self.autoExportIntervalHours = Int(AppDatabase.shared.setting(for: "auto_export_interval_hours") ?? "24") ?? 24
+        self.autoExportPath = AppDatabase.shared.setting(for: "auto_export_path") ?? ""
+        if let bookmarkBase64 = AppDatabase.shared.setting(for: "auto_export_bookmark") {
+            self.autoExportBookmark = Data(base64Encoded: bookmarkBase64)
+        }
+        
+        // Load Focus Mode
+        self.isMacFocusModeEnabled = AppDatabase.shared.setting(for: "mac_focus_mode_enabled") == "true"
+
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd"
         df.locale = Locale(identifier: "en_US_POSIX")
         let todayStr = df.string(from: Date())
         
         self.todayGoal = AppDatabase.shared.dailyPlan(for: todayStr)
-        print("[AppState] Initial goal loaded: '\(todayGoal)'")
+        
+        if let coachJson = AppDatabase.shared.setting(for: "ai_coach_tasks:\(todayStr)"),
+           let data = coachJson.data(using: .utf8),
+           let tasks = try? JSONDecoder().decode([String].self, from: data) {
+            self.aiCoachTasks = tasks
+        }
+        
+        print("[AppState] Initial goal loaded: '\(todayGoal)', Coach tasks: \(aiCoachTasks.count)")
 
         // Load Reminders
         self.isUsageReminderEnabled = AppDatabase.shared.setting(for: "usage_reminder_enabled") == "true"
