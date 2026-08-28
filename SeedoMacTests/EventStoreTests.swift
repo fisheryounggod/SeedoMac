@@ -23,6 +23,7 @@ final class EventStoreTests: XCTestCase {
                     url TEXT, path TEXT, page_type TEXT,
                     is_redacted INTEGER NOT NULL DEFAULT 0
                 );
+                CREATE INDEX idx_events_end_ts ON events(end_ts);
             """)
         }
         store = EventStore(db: db)
@@ -76,5 +77,30 @@ final class EventStoreTests: XCTestCase {
         }
         let top5 = try store.topApps(startMs: baseMs, endMs: baseMs + 1_000_000_000, limit: 5)
         XCTAssertEqual(top5.count, 5)
+    }
+
+    func test_bulkInsert_coalescesAdjacentMatchingEvents() throws {
+        let events = [
+            Event(startTs: 1_000, endTs: 2_000, appOrDomain: "Xcode", bundleId: "xcode", title: "main.swift"),
+            Event(startTs: 3_000, endTs: 5_000, appOrDomain: "Xcode", bundleId: "xcode", title: "main.swift")
+        ]
+
+        try store.bulkInsert(events)
+
+        let fetched = try store.recentEvents(limit: 10)
+        XCTAssertEqual(fetched.count, 1)
+        XCTAssertEqual(fetched[0].startTs, 1_000)
+        XCTAssertEqual(fetched[0].endTs, 5_000)
+    }
+
+    func test_bulkInsert_keepsDifferentWindowsSeparate() throws {
+        let events = [
+            Event(startTs: 1_000, endTs: 2_000, appOrDomain: "Xcode", title: "main.swift"),
+            Event(startTs: 3_000, endTs: 5_000, appOrDomain: "Xcode", title: "README.md")
+        ]
+
+        try store.bulkInsert(events)
+
+        XCTAssertEqual(try store.recentEvents(limit: 10).count, 2)
     }
 }

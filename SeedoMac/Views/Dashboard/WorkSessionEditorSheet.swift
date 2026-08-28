@@ -5,6 +5,8 @@ struct WorkSessionEditorSheet: View {
     @State var session: WorkSession
     let onSave: (WorkSession) -> Void
     let onCancel: () -> Void
+    
+    @State private var isGenerating = false
 
     private var startDate: Binding<Date> {
         Binding(
@@ -27,7 +29,17 @@ struct WorkSessionEditorSheet: View {
             
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("标题").font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        Text("标题").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button(action: generateAISummary) {
+                            Label(isGenerating ? "生成中..." : "AI 一键生成", systemImage: "sparkles")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.blue)
+                        .disabled(isGenerating)
+                    }
                     TextField("这次活动的主要总结...", text: $session.summary)
                         .textFieldStyle(.roundedBorder)
                 }
@@ -90,5 +102,22 @@ struct WorkSessionEditorSheet: View {
         }
         .padding(20)
         .frame(width: 440)
+    }
+
+    private func generateAISummary() {
+        isGenerating = true
+        AIService.shared.generateSessionSummary(startTs: session.startTs, endTs: session.endTs) { result in
+            DispatchQueue.main.async {
+                isGenerating = false
+                switch result {
+                case .success(let text):
+                    if !text.isEmpty {
+                        self.session.summary = text
+                    }
+                case .failure(let error):
+                    print("AI Generate error: \(error)")
+                }
+            }
+        }
     }
 }

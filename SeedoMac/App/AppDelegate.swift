@@ -2,6 +2,7 @@
 import AppKit
 import SwiftUI
 import KeyboardShortcuts
+import Combine
 
 
 // Support keyboard input in borderless windows
@@ -15,16 +16,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var popover: NSPopover!
     private var dashboardWindowController: DashboardWindowController?
     private var settingsWindowController: SettingsWindowController?
-    private var afkReturnPopover: NSPopover?
+    private var afkReturnWindowController: NSWindowController?
     private var deepFocusWindows: [NSWindowController] = []
     private var aiReviewWindowController: NSWindowController?
     private var breakOverlayController: BreakOverlayWindowController?
     let appState = AppState.shared
     private var tracker: ActivityTracker!
     private var refreshTimer: Timer?
+    private var statsRefreshTimer: Timer?
     private var obsidianImportTimer: Timer?
     private var autoSummaryTimer: Timer?
-    private var previousTrackingState: Bool = true
+    private var cancellables = Set<AnyCancellable>()
+    private var notificationObservers: [NSObjectProtocol] = []
+    private var isStatsRefreshInFlight = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         loadSettings()
@@ -54,22 +58,43 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         _ = AutoExportService.shared
         _ = FocusModeService.shared
         
-        NotificationCenter.default.addObserver(forName: .usageReminderTriggered, object: nil, queue: .main) { _ in
+        let usageObserver = NotificationCenter.default.addObserver(forName: .usageReminderTriggered, object: nil, queue: .main) { _ in
             NotificationService.shared.showUsageReminder()
         }
+        notificationObservers.append(usageObserver)
+        
+        setupTrackingObserver()
+    }
+    
+    private func setupTrackingObserver() {
+        appState.$isTracking
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                self.tracker.syncSettings(from: self.appState)
+            }
+            .store(in: &cancellables)
     }
 
     private func setupBreakObserver() {
-        NotificationCenter.default.addObserver(forName: .breakShouldStart, object: nil, queue: .main) { [weak self] note in
+        let breakObserver = NotificationCenter.default.addObserver(forName: .breakShouldStart, object: nil, queue: .main) { [weak self] note in
             guard let self = self else { return }
-            guard let startTs = note.userInfo?["startTs"] as? Int64,
-                  let endTs = note.userInfo?["endTs"] as? Int64,
-                  let durationSecs = note.userInfo?["durationSecs"] as? Double,
-                  let canPostpone = note.userInfo?["canPostpone"] as? Bool,
-                  let isLong = note.userInfo?["isLongBreak"] as? Bool,
-                  let durMins = note.userInfo?["durationMins"] as? Int,
-                  let idx = note.userInfo?["sessionIndex"] as? Int,
-                  let total = note.userInfo?["totalSessions"] as? Int else { return }
+
+            self.closeDeepFocusWindows()
+
+            let userInfo = note.userInfo ?? [:]
+            let startTs = (userInfo["startTs"] as? NSNumber)?.int64Value ?? 0
+            let endTs = (userInfo["endTs"] as? NSNumber)?.int64Value ?? 0
+            let durationSecs = (userInfo["durationSecs"] as? NSNumber)?.doubleValue ?? 0
+            let canPostpone = (userInfo["canPostpone"] as? NSNumber)?.boolValue ?? false
+            let isLong = (userInfo["isLongBreak"] as? NSNumber)?.boolValue ?? false
+            let durMins = (userInfo["durationMins"] as? NSNumber)?.intValue ?? 5
+            let idx = (userInfo["sessionIndex"] as? NSNumber)?.intValue ?? 1
+            let total = (userInfo["totalSessions"] as? NSNumber)?.intValue ?? 4
+            let initialSummary = userInfo["previousSummary"] as? String ?? ""
+            let initialNotes = userInfo["previousNotes"] as? String ?? ""
+            let initialCategoryId = userInfo["previousCategoryId"] as? String
             
             self.showBreakOverlay(
                 startTs: startTs, 
@@ -80,27 +105,47 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 durationMins: durMins,
                 sessionIndex: idx,
                 totalSessions: total,
-                initialSummary: note.userInfo?["previousSummary"] as? String ?? "",
-                initialNotes: note.userInfo?["previousNotes"] as? String ?? "",
-                initialCategoryId: note.userInfo?["previousCategoryId"] as? String
+                initialSummary: initialSummary,
+                initialNotes: initialNotes,
+                initialCategoryId: initialCategoryId
             )
         }
+        notificationObservers.append(breakObserver)
 
-        NotificationCenter.default.addObserver(forName: .afkReturnDetected, object: nil, queue: .main) { [weak self] note in
+        let afkReturnObserver = NotificationCenter.default.addObserver(forName: .afkReturnDetected, object: nil, queue: .main) { [weak self] note in
             if let start = note.userInfo?["startTs"] as? Int64,
                let end = note.userInfo?["endTs"] as? Int64 {
                 self?.showAFKReturnPopup(start: start, end: end)
             }
         }
+        notificationObservers.append(afkReturnObserver)
 
-        NotificationCenter.default.addObserver(forName: .afkThresholdReached, object: nil, queue: .main) { [weak self] note in
+        let afkThresholdObserver = NotificationCenter.default.addObserver(forName: .afkThresholdReached, object: nil, queue: .main) { [weak self] note in
             if let endTs = note.userInfo?["endTs"] as? Int64 {
                 self?.handleAFKThresholdReached(endTs: endTs)
             }
         }
+        notificationObservers.append(afkThresholdObserver)
+
+        let sessionSaveObserver = NotificationCenter.default.addObserver(forName: .workSessionDidSave, object: nil, queue: .main) { [weak self] _ in
+            self?.refreshTodayStats()
+        }
+        notificationObservers.append(sessionSaveObserver)
     }
 
     private func handleAFKThresholdReached(endTs: Int64) {
+        // 1. Close break overlay if open
+        if breakOverlayController != nil {
+            breakOverlayController?.close()
+            breakOverlayController = nil
+            // Ensure we reset the scheduler state so it doesn't get stuck
+            BreakScheduler.shared.isBreakInProgress = false
+        }
+
+        // 2. Retroactive pause: subtract AFK threshold from current timer
+        let scheduler = BreakScheduler.shared
+        scheduler.workElapsedSecsDetailed = max(0, scheduler.workElapsedSecsDetailed - appState.afkThresholdSecs)
+
         // Force stop tracking in appState
         appState.isTracking = false
         appState.currentSessionStartMs = endTs
@@ -113,7 +158,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Notify others
         NotificationCenter.default.post(name: .workSessionDidSave, object: nil)
     }
-    
+
     private func showBreakOverlay(
         startTs: Int64, 
         endTs: Int64, 
@@ -149,6 +194,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return false
     }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        refreshTimer?.invalidate()
+        statsRefreshTimer?.invalidate()
+        obsidianImportTimer?.invalidate()
+        autoSummaryTimer?.invalidate()
+        tracker?.stop()
+        cancellables.removeAll()
+        notificationObservers.forEach(NotificationCenter.default.removeObserver)
+        notificationObservers.removeAll()
+    }
     
 
     // MARK: - Setup
@@ -169,15 +225,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         
         KeyboardShortcuts.onKeyDown(for: .startPauseFocus) { [weak self] in
-            // Toggle today's status
-            let current = (AppDatabase.shared.setting(for: "break_disabled_day") ?? "") != DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none)
-            if current {
-                let todayStr = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none)
-                AppDatabase.shared.saveSetting(key: "break_disabled_day", value: todayStr)
-            } else {
-                AppDatabase.shared.saveSetting(key: "break_disabled_day", value: "")
-            }
-            BreakScheduler.shared.refreshConfig()
+            self?.toggleTracking()
         }
 
         KeyboardShortcuts.onKeyDown(for: .openSettings) { [weak self] in
@@ -217,7 +265,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         tracker.start()
         // Re-sync cached settings whenever the user saves settings; also
         // kick off an Obsidian import in case the toggle just flipped on.
-        NotificationCenter.default.addObserver(
+        let settingsObserver = NotificationCenter.default.addObserver(
             forName: .settingsDidSave, object: nil, queue: .main
         ) { [weak self] _ in
             guard let self else { return }
@@ -225,13 +273,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.runObsidianImportIfEnabled()
             self.rescheduleDailyReminders()
         }
+        notificationObservers.append(settingsObserver)
     }
 
     private func scheduleUIRefresh() {
+        refreshTimer?.invalidate()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.updateMenuBarIcon()
+        }
+        if let refreshTimer {
+            RunLoop.main.add(refreshTimer, forMode: .common)
+        }
+
+        statsRefreshTimer?.invalidate()
+        statsRefreshTimer = Timer.scheduledTimer(withTimeInterval: 15.0, repeats: true) { [weak self] _ in
             self?.refreshTodayStats()
         }
-        refreshTodayStats()  // immediate first load
+        if let statsRefreshTimer {
+            RunLoop.main.add(statsRefreshTimer, forMode: .common)
+        }
+
+        updateMenuBarIcon()
+        refreshTodayStats()
     }
 
     /// Schedules an hourly Obsidian auto-import in addition to an immediate
@@ -239,6 +302,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// setting so it's a no-op until Fisher explicitly opts in.
     private func scheduleObsidianAutoImport() {
         runObsidianImportIfEnabled()
+        obsidianImportTimer?.invalidate()
         obsidianImportTimer = Timer.scheduledTimer(
             withTimeInterval: 3600, repeats: true
         ) { [weak self] _ in
@@ -266,6 +330,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// today and the day's summary hasn't been generated yet. Check itself is
     /// cheap (2 setting reads + 2 date-comp comparisons).
     private func scheduleAutoDailySummary() {
+        autoSummaryTimer?.invalidate()
         autoSummaryTimer = Timer.scheduledTimer(
             withTimeInterval: 60, repeats: true
         ) { [weak self] _ in
@@ -344,6 +409,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshTodayStats() {
+        guard !isStatsRefreshInFlight else { return }
+        isStatsRefreshInFlight = true
+
         let store = EventStore()
         let sessionStore = WorkSessionStore()
         
@@ -359,13 +427,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let startMs = Int64(startOfDay.timeIntervalSince1970 * 1000)
             let endMs = Int64(Date().timeIntervalSince1970 * 1000)
             
-            let sessions = (try? sessionStore.sessions(from: startMs, to: endMs)) ?? []
-            let focusSecs = sessions.filter { s in
-                let cat = SessionCategory.find(s.categoryId)
-                return cat.name.contains("专注")
-            }.reduce(0.0) { $0 + $1.durationSecs }
+            let focusSecs = (try? sessionStore.focusedDuration(from: startMs, to: endMs)) ?? 0
 
             DispatchQueue.main.async {
+                self.isStatsRefreshInFlight = false
                 self.appState.todayTotalSecs = focusSecs
                 self.appState.todayTopApps = Array(includedApps.prefix(BreakConfig.load().topAppsLimit))
                 self.updateMenuBarIcon()
@@ -377,7 +442,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let scheduler = BreakScheduler.shared
         let elapsed = Int(scheduler.workElapsedSecsDetailed)
         let total = Int(scheduler.workIntervalSecs)
-        let remainingMins = max(0, (total - elapsed) / 60)
+        let displayMins = scheduler.timerMode == .countdown
+            ? max(0, (total - elapsed) / 60)
+            : elapsed / 60
         let progress = min(1.0, Double(elapsed) / Double(total))
         
         // Pulse effect implementation: vary scale between 0.9 and 1.1 if tracking
@@ -391,7 +458,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if let button = statusItem.button {
-            button.image = generateProgressImage(progress: progress, text: "\(remainingMins)", scale: pulseScale)
+            button.image = generateProgressImage(progress: progress, text: "\(displayMins)", scale: pulseScale)
             button.imagePosition = .imageOnly
         }
     }
@@ -575,24 +642,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func enterDeepFocus() {
-        // 1. Save current state and pause normal tracking
-        previousTrackingState = appState.isTracking
-        appState.isTracking = false
         appState.isDeepFocusActive = true
+        BreakScheduler.shared.enterDeepFocusSurface()
         
         if deepFocusWindows.isEmpty {
             for screen in NSScreen.screens {
                 let isPrimary = screen == NSScreen.main
                 let view = DeepFocusView(appState: appState, onClose: { [weak self] in
-                    guard let self = self else { return }
-                    for controller in self.deepFocusWindows {
-                        controller.close()
-                    }
-                    self.deepFocusWindows.removeAll()
-                    
-                    // 2. Restore previous tracking state on exit
-                    self.appState.isDeepFocusActive = false
-                    self.appState.isTracking = self.previousTrackingState
+                    self?.closeDeepFocusWindows()
                 }, isPrimary: isPrimary)
                 
                 let controller = NSHostingController(rootView: view)
@@ -614,33 +671,80 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    private func closeDeepFocusWindows() {
+        for controller in deepFocusWindows {
+            controller.close()
+        }
+        deepFocusWindows.removeAll()
+        appState.isDeepFocusActive = false
+        BreakScheduler.shared.exitDeepFocusSurface()
+    }
+
     private func showAFKReturnPopup(start: Int64, end: Int64) {
-        if afkReturnPopover == nil {
-            afkReturnPopover = NSPopover()
-            afkReturnPopover?.behavior = .applicationDefined
+        if afkReturnWindowController != nil {
+            afkReturnWindowController?.close()
         }
         
-        afkReturnPopover?.contentViewController = NSHostingController(
-            rootView: AFKReturnView(
-                startTs: start,
-                endTs: end,
-                onSave: { [weak self] (session: WorkSession) in
-                    self?.saveOfflineActivity(session: session)
-                    self?.afkReturnPopover?.performClose(nil)
-                },
-                onDismiss: { [weak self] in
-                    self?.afkReturnPopover?.performClose(nil)
-                }
-            )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 720),
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = true
+        window.backgroundColor = .windowBackgroundColor
+        window.isOpaque = false
+        window.hasShadow = true
+        window.level = .floating
+        window.setFrameAutosaveName("AFKReturnWindow")
+        
+        if window.setFrameUsingName("AFKReturnWindow") == false {
+            window.center()
+        }
+        
+        let view = AFKReturnView(
+            startTs: start,
+            endTs: end,
+            onSave: { [weak self] (session: WorkSession) in
+                self?.saveOfflineActivity(session: session)
+                self?.afkReturnWindowController?.close()
+                self?.afkReturnWindowController = nil
+                self?.finalizeAFKReturn()
+            },
+            onDismiss: { [weak self] in
+                self?.afkReturnWindowController?.close()
+                self?.afkReturnWindowController = nil
+                self?.finalizeAFKReturn()
+            }
         )
         
-        if let button = statusItem.button {
-            afkReturnPopover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            // Critical for IME and focus:
-            afkReturnPopover?.contentViewController?.view.window?.makeKey()
-        }
+        window.contentView = NSHostingView(rootView: view)
+        
+        afkReturnWindowController = NSWindowController(window: window)
+        afkReturnWindowController?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
     }
     
+    private func finalizeAFKReturn() {
+        let elapsed = BreakScheduler.shared.workElapsedSecsDetailed
+        if elapsed > 0 {
+            let alert = NSAlert()
+            alert.messageText = "继续上一个计时？"
+            alert.informativeText = "检测到之前有一个正在进行的 \(Int(elapsed / 60)) 分钟计时。您想继续吗？"
+            alert.addButton(withTitle: "继续")
+            alert.addButton(withTitle: "重新开始")
+
+            let response = alert.runModal()
+            if response == .alertSecondButtonReturn {
+                BreakScheduler.shared.resetWork()
+            }
+        }
+        appState.isTracking = true
+    }
+
     func showTransientAISummary(context: String, label: String, onSave: ((String) -> Void)? = nil) {
         // This is for manual triggers: display in window, NO SAVE to DB or Obsidian
         DispatchQueue.main.async {

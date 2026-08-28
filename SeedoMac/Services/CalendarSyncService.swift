@@ -74,6 +74,8 @@ final class CalendarSyncService {
     func sync(session: WorkSession) {
         // Guard if explicitly disabled
         guard AppDatabase.shared.setting(for: "calendar_sync_enabled") == "true" else { return }
+        // Skip unclassified sessions
+        guard SessionCategory.find(session.categoryId).id != "none" else { return }
         
         requestAccess { [weak self] granted in
             guard let self = self, granted else { return }
@@ -91,8 +93,13 @@ final class CalendarSyncService {
                                                                     calendars: [calendar])
                 let existingEvents = self.eventStore.events(matching: predicate)
                 
+                // 2. Compute displayTitle first so dedup uses the same value stored in the event
+                let cat = SessionCategory.find(session.categoryId)
+                var displayTitle = session.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? cat.name : session.summary
+                displayTitle = displayTitle.replacingOccurrences(of: "Focus Session: ", with: "")
+
                 let event: EKEvent
-                if let existing = existingEvents.first(where: { $0.title.contains(session.summary) || $0.title.contains(session.title) }) {
+                if let existing = existingEvents.first(where: { $0.title == displayTitle }) {
                     event = existing
                     print("[Calendar] Updating existing event for session: \(session.startTs)")
                 } else {
@@ -100,12 +107,6 @@ final class CalendarSyncService {
                     event.calendar = calendar
                     print("[Calendar] Creating new event for session: \(session.startTs)")
                 }
-                
-                // 2. Update properties
-                // Align with Seedo UI: 'summary' is the Headline (Title in Calendar), 'title' is the Remark (Notes in Calendar)
-                let cat = SessionCategory.find(session.categoryId)
-                var displayTitle = session.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? cat.name : session.summary
-                displayTitle = displayTitle.replacingOccurrences(of: "Focus Session: ", with: "")
                 
                 event.title = displayTitle
                 event.startDate = start

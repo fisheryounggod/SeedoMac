@@ -3,7 +3,6 @@ import SwiftUI
 
 struct TodayView: View {
     @ObservedObject var appState: AppState
-    @ObservedObject var breakScheduler = BreakScheduler.shared
     let openDashboard: (DashboardTab) -> Void
 
     var body: some View {
@@ -14,7 +13,7 @@ struct TodayView: View {
             header
             Divider()
             
-            breakProgressSection
+            TimerSection(appState: appState)
             
             Divider()
             todayGoalSection
@@ -27,7 +26,7 @@ struct TodayView: View {
         .background(.regularMaterial)
     }
 
-    // MARK: - Accessibility Banner
+    // ... (accessibilityBanner and header remains same)
 
     private var accessibilityBanner: some View {
         HStack(spacing: 8) {
@@ -44,8 +43,6 @@ struct TodayView: View {
         .padding(.vertical, 6)
         .background(Color.yellow.opacity(0.1))
     }
-
-    // MARK: - Header
 
     private var header: some View {
         HStack {
@@ -64,61 +61,8 @@ struct TodayView: View {
         .padding(.vertical, 14)
     }
 
-    // MARK: - Sections
+    // Moved breakProgressSection logic to TimerSection
 
-    private var breakProgressSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center) {
-                let remaining = max(0, Int(breakScheduler.workIntervalSecs - breakScheduler.workElapsedSecsDetailed))
-                let mins = remaining / 60
-                let secs = remaining % 60
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(String(format: "%02d:%02d", mins, secs))
-                        .font(.system(size: 28, weight: .bold, design: .monospaced))
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
-                    
-                    Text(appState.isTracking ? "正在专注..." : "已暂停")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(appState.isTracking ? .green : .orange)
-                }
-                
-                Spacer()
-                
-                Image(systemName: appState.isTracking ? "pause.fill" : "play.fill")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 40, height: 40)
-                    .background(Color.primary.opacity(0.05))
-                    .clipShape(Circle())
-            }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                appState.isTracking.toggle()
-                // Provide haptic feedback if possible, or just log
-                print("[TodayView] Toggled tracking: \(appState.isTracking)")
-            }
-            
-            let progress = min(1.0, breakScheduler.workElapsedSecsDetailed / max(1.0, breakScheduler.workIntervalSecs))
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.primary.opacity(0.05))
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(LinearGradient(colors: [.green.opacity(0.8), .green], startPoint: .leading, endPoint: .trailing))
-                        .frame(width: geo.size.width * progress)
-                }
-            }
-            .frame(height: 6)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-    }
-
-
-    // MARK: - Today's Goal
-    
     @State private var isHoveringGoal = false
     @State private var isEditingGoal = false
     @State private var draftGoal = ""
@@ -183,9 +127,8 @@ struct TodayView: View {
                 startEditing()
             }
         }
-        .animation(.easeInOut(duration: 0.15), value: isEditingGoal)
     }
-    
+
     @State private var isRefreshingCoach = false
     @State private var coachError: String? = nil
 
@@ -253,14 +196,13 @@ struct TodayView: View {
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 let context = try SummaryContextBuilder().build(for: todayStr)
-                
+
                 AIService.shared.generateCoachTasks(context: context) { result in
                     DispatchQueue.main.async {
                         isRefreshingCoach = false
                         switch result {
                         case .success(let tasks):
                             self.appState.aiCoachTasks = tasks
-                            // Persist
                             if let data = try? JSONEncoder().encode(tasks),
                                let json = String(data: data, encoding: .utf8) {
                                 AppDatabase.shared.saveSetting(key: "ai_coach_tasks:\(todayStr)", value: json)
@@ -291,13 +233,11 @@ struct TodayView: View {
         let trimmed = draftGoal.trimmingCharacters(in: .whitespacesAndNewlines)
         appState.todayGoal = trimmed
         
-        // Persist to database
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd"
         df.locale = Locale(identifier: "en_US_POSIX")
         let todayKey = "plan_daily:\(df.string(from: Date()))"
         AppDatabase.shared.saveSetting(key: todayKey, value: trimmed)
-        print("[TodayView] Saved goal '\(trimmed)' to key '\(todayKey)'")
         
         isEditingGoal = false
         goalFieldFocused = false
@@ -307,5 +247,81 @@ struct TodayView: View {
         isEditingGoal = false
         goalFieldFocused = false
         draftGoal = ""
+    }
+}
+
+// MARK: - TimerSection (Isolated to prevent parent re-renders)
+struct TimerSection: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject var breakScheduler = BreakScheduler.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center) {
+                let displaySecs = breakScheduler.timerMode == .countdown
+                    ? breakScheduler.remainingSecs
+                    : breakScheduler.workElapsedSecs
+                let mins = displaySecs / 60
+                let secs = displaySecs % 60
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(format: "%02d:%02d", mins, secs))
+                        .font(.system(size: 28, weight: .bold, design: .monospaced))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+
+                    Text(timerStatusText)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(appState.isTracking ? .green : .orange)
+                }
+
+                Spacer()
+
+                Button {
+                    breakScheduler.toggleTimerMode()
+                } label: {
+                    Image(systemName: breakScheduler.timerMode == .countdown ? "timer" : "stopwatch")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 34, height: 34)
+                        .background(Color.primary.opacity(0.05))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .help(breakScheduler.timerMode == .countdown ? "切换为正计时" : "切换为倒计时")
+
+                Button {
+                    appState.isTracking.toggle()
+                } label: {
+                    Image(systemName: appState.isTracking ? "pause.fill" : "play.fill")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 40, height: 40)
+                        .background(Color.primary.opacity(0.05))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .help(appState.isTracking ? "暂停计时" : "继续计时")
+            }
+
+            let progress = min(1.0, breakScheduler.workElapsedSecsDetailed / max(1.0, breakScheduler.workIntervalSecs))
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.primary.opacity(0.05))
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(LinearGradient(colors: [.green.opacity(0.8), .green], startPoint: .leading, endPoint: .trailing))
+                        .frame(width: geo.size.width * progress)
+                }
+            }
+            .frame(height: 6)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    private var timerStatusText: String {
+        guard appState.isTracking else { return "已暂停" }
+        return breakScheduler.timerMode == .countdown ? "倒计时专注中..." : "正计时专注中..."
     }
 }

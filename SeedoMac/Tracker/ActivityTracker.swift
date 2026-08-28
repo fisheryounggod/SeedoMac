@@ -7,6 +7,7 @@ final class ActivityTracker {
     private let eventStore: EventStore
     private var timer: DispatchSourceTimer?
     private var flushTimer: DispatchSourceTimer?
+    private var terminationObserver: NSObjectProtocol?
     private let queue = DispatchQueue(label: "tech.seedo.tracker", qos: .utility)
     private lazy var buffer = SessionBuffer { [weak self] events in
         self?.flush(events)
@@ -17,7 +18,22 @@ final class ActivityTracker {
     private var _isTracking: Bool = true
     private var _afkThreshold: Double = 900
     private var _isRedactTitles: Bool = false
-    
+
+    // Title caching — only refresh every 2s to reduce Accessibility API overhead
+    private var _cachedTitle: String = ""
+    private var _cachedURL: String = ""
+    private var _lastTitleFetchTime: Int64 = 0
+    private let _titleFetchIntervalMs: Int64 = 2000
+
+    // URL fail cooldown — skip AX tree walk for 5s after an empty result
+    private var _lastURLFailTime: Int64 = 0
+    private let _urlFailCooldownMs: Int64 = 5000
+
+    // Permission check — only re-check every 10s on tracker queue, post to main only on change
+    private var _cachedPermission: Bool = false
+    private var _lastPermissionCheckTime: Int64 = 0
+    private let _permissionCheckIntervalMs: Int64 = 10_000
+
     // Usage reminder tracking
     private var continuousActiveSecs: Double = 0
     private var _isUsageReminderEnabled: Bool = false
@@ -46,7 +62,13 @@ final class ActivityTracker {
         )
         let newAFK = idleSecs >= _afkThreshold
         
+        // Debug logging for weird idle times
+        if idleSecs > 3600 && !isAFK {
+            print("[ActivityTracker] Warning: unusually high idle time detected: \(idleSecs)s")
+        }
+
         if newAFK && !isAFK && _isTracking {
+            print("[ActivityTracker] AFK threshold reached: \(idleSecs)s >= \(_afkThreshold)s")
             // First time hitting threshold while tracking
             let endTs = Int64(Date().timeIntervalSince1970 * 1000) - Int64(idleSecs * 1000)
             NotificationCenter.default.post(
@@ -58,6 +80,7 @@ final class ActivityTracker {
         
         if newAFK != isAFK {
             isAFK = newAFK
+            print("[ActivityTracker] isAFK changed to: \(isAFK) (idle: \(Int(idleSecs))s)")
             NotificationCenter.default.post(
                 name: .afkStateDidChange,
                 object: nil,
@@ -67,6 +90,8 @@ final class ActivityTracker {
     }
 
     func start() {
+        guard timer == nil, flushTimer == nil else { return }
+
         // Snapshot current settings on the main thread before the timer fires
         syncSettings(from: appState)
 
@@ -85,7 +110,7 @@ final class ActivityTracker {
         flushTimer = ft
 
         // Flush on app quit (prevents data loss)
-        NotificationCenter.default.addObserver(
+        terminationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification,
             object: nil, queue: nil
         ) { [weak self] _ in
@@ -98,7 +123,15 @@ final class ActivityTracker {
         timer = nil
         flushTimer?.cancel()
         flushTimer = nil
+        if let terminationObserver {
+            NotificationCenter.default.removeObserver(terminationObserver)
+            self.terminationObserver = nil
+        }
         buffer.flushAll()
+    }
+
+    deinit {
+        stop()
     }
 
     /// Clears the current session buffer — used for 'Record and Reset'
@@ -109,28 +142,36 @@ final class ActivityTracker {
     // MARK: - Private
 
     private func tick() {
-        // ALWAYS update permission status, even if tracking is off.
-        DispatchQueue.main.async { [weak self] in
-            self?.appState.hasAccessibilityPermission = WindowInfoProvider.isPermissionGranted
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+
+        // Fix #1: AX permission check on tracker queue every 10s; post to main only on change.
+        // Was: AXIsProcessTrusted() dispatched to main thread every second (TCC syscall → input lag).
+        if nowMs - _lastPermissionCheckTime >= _permissionCheckIntervalMs {
+            _lastPermissionCheckTime = nowMs
+            let granted = WindowInfoProvider.isPermissionGranted
+            if granted != _cachedPermission {
+                _cachedPermission = granted
+                DispatchQueue.main.async { [weak self] in
+                    self?.appState.hasAccessibilityPermission = granted
+                }
+            }
         }
 
         // Always check AFK to track continuous active time
         checkAFK()
 
         if isAFK {
-            continuousActiveSecs = 0 // Reset on AFK
+            continuousActiveSecs = 0
             return
         }
 
         if _isTracking {
-            continuousActiveSecs = 0 // Reset if we are already tracking focus
+            continuousActiveSecs = 0
         } else {
             continuousActiveSecs += 1
-            
-            // Check for usage reminder
             if _isUsageReminderEnabled && continuousActiveSecs >= _usageReminderThresholdSecs {
                 NotificationCenter.default.post(name: .usageReminderTriggered, object: nil)
-                continuousActiveSecs = 0 // Reset to avoid spamming
+                continuousActiveSecs = 0
             }
         }
 
@@ -142,32 +183,54 @@ final class ActivityTracker {
         let bundleId = app.bundleIdentifier ?? ""
         let pid      = app.processIdentifier
 
-        // Window title via Accessibility API (gracefully degrades if no permission)
-        let rawTitle = WindowInfoProvider.getTitle(pid: pid) ?? ""
-        let title    = _isRedactTitles ? "" : rawTitle
-
-        // URL extraction for browser apps (only when not redacting)
-        let currentURL: String
-        if !_isRedactTitles && BrowserURLProvider.isBrowser(bundleId: bundleId) {
-            currentURL = BrowserURLProvider.getURL(pid: pid, bundleId: bundleId) ?? ""
+        // Window title via Accessibility API — only fetch every 2s to reduce CPU overhead
+        let title: String
+        if _isRedactTitles {
+            title = ""
+            _cachedTitle = ""
+        } else if nowMs - _lastTitleFetchTime >= _titleFetchIntervalMs {
+            let rawTitle = WindowInfoProvider.getTitle(pid: pid) ?? ""
+            _cachedTitle = rawTitle.isEmpty ? _cachedTitle : rawTitle
+            _lastTitleFetchTime = nowMs
+            title = _cachedTitle
         } else {
-            currentURL = ""
+            title = _cachedTitle
         }
 
-        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        // Fix #3: URL fail cooldown — skip AX tree walk for 5s after an empty result.
+        // Was: retried expensive AX tree traversal every second when browser didn't expose URL.
+        let currentURL: String
+        if !_isRedactTitles && BrowserURLProvider.isBrowser(bundleId: bundleId) {
+            if nowMs - _lastTitleFetchTime < _titleFetchIntervalMs && !_cachedURL.isEmpty {
+                currentURL = _cachedURL
+            } else if _cachedURL.isEmpty && nowMs - _lastURLFailTime < _urlFailCooldownMs {
+                currentURL = ""
+            } else {
+                let url = BrowserURLProvider.getURL(pid: pid, bundleId: bundleId) ?? ""
+                if url.isEmpty { _lastURLFailTime = nowMs }
+                _cachedURL = url
+                currentURL = url
+            }
+        } else {
+            currentURL = ""
+            _cachedURL = ""
+        }
+
         buffer.process(app: appName, title: title, url: currentURL, bundleId: bundleId, nowMs: nowMs)
 
-        // Update shared state on main thread for UI
+        // Fix #2: Read buffer.currentEvent once here on the tracker queue.
+        // Was: main thread called queue.sync twice per second, blocking on DB writes.
+        let sessionStartMs = (buffer.currentEvent?.appOrDomain == appName)
+            ? (buffer.currentEvent?.startTs ?? nowMs)
+            : nowMs
+
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.appState.currentApp = appName
-            self.appState.currentTitle = title
-            self.appState.currentURL = currentURL
-            // Only update session start if the buffer's current event is still for the same app
-            if self.buffer.currentEvent?.appOrDomain == appName {
-                self.appState.currentSessionStartMs = self.buffer.currentEvent?.startTs ?? nowMs
-            } else {
-                self.appState.currentSessionStartMs = nowMs
+            if self.appState.currentApp != appName { self.appState.currentApp = appName }
+            if self.appState.currentTitle != title { self.appState.currentTitle = title }
+            if self.appState.currentURL != currentURL { self.appState.currentURL = currentURL }
+            if self.appState.currentSessionStartMs != sessionStartMs {
+                self.appState.currentSessionStartMs = sessionStartMs
             }
         }
     }

@@ -29,10 +29,43 @@ final class EventStore {
     }
 
     func bulkInsert(_ events: [Event]) throws {
-        var copy = events
+        guard !events.isEmpty else { return }
         try db.write { d in
-            for i in copy.indices { try copy[i].insert(d) }
+            var previous = try Event
+                .order(Column("start_ts").desc, Column("id").desc)
+                .fetchOne(d)
+
+            for event in events.sorted(by: { $0.startTs < $1.startTs }) {
+                if let previousID = previous?.id,
+                   canCoalesce(previous, with: event) {
+                    let mergedEnd = max(previous?.endTs ?? event.endTs, event.endTs)
+                    try d.execute(
+                        sql: "UPDATE events SET end_ts = ? WHERE id = ?",
+                        arguments: [mergedEnd, previousID]
+                    )
+                    previous?.endTs = mergedEnd
+                    continue
+                }
+
+                var mutableEvent = event
+                try mutableEvent.insert(d)
+                previous = mutableEvent
+            }
         }
+    }
+
+    private func canCoalesce(_ previous: Event?, with next: Event) -> Bool {
+        guard let previous else { return false }
+        let gapMs = next.startTs - previous.endTs
+        return gapMs >= 0 && gapMs <= 5_000
+            && previous.source == next.source
+            && previous.appOrDomain == next.appOrDomain
+            && previous.bundleId == next.bundleId
+            && previous.title == next.title
+            && previous.url == next.url
+            && previous.path == next.path
+            && previous.pageType == next.pageType
+            && previous.isRedacted == next.isRedacted
     }
 
     // MARK: - Read
@@ -57,7 +90,7 @@ final class EventStore {
             let rows = try Row.fetchAll(d, sql: """
                 SELECT app_or_domain,
                        SUM((MIN(end_ts, ?) - MAX(start_ts, ?)) / 1000.0) AS total_secs
-                FROM   events
+                FROM   events INDEXED BY idx_events_end_ts
                 WHERE  start_ts < ? AND end_ts > ?
                 GROUP  BY app_or_domain
                 ORDER  BY total_secs DESC
@@ -82,7 +115,7 @@ final class EventStore {
                 SELECT
                     strftime('%Y-%m-%d', start_ts / 1000, 'unixepoch', 'localtime') AS day,
                     SUM((MIN(end_ts, ?) - MAX(start_ts, ?)) / 1000.0)              AS total_secs
-                FROM   events
+                FROM   events INDEXED BY idx_events_end_ts
                 WHERE  start_ts < ? AND end_ts > ?
                 GROUP  BY day
             """, arguments: [endMs, startMs, endMs, startMs])
@@ -100,7 +133,33 @@ final class EventStore {
     }
 
     func topApps(startMs: Int64, endMs: Int64, limit: Int = 10) throws -> [AppStat] {
-        let all = try statsByRange(startMs: startMs, endMs: endMs)
-        return Array(all.prefix(limit))
+        try db.read { d in
+            let rows = try Row.fetchAll(d, sql: """
+                SELECT app_or_domain,
+                       SUM((MIN(end_ts, ?) - MAX(start_ts, ?)) / 1000.0) AS total_secs
+                FROM   events INDEXED BY idx_events_end_ts
+                WHERE  start_ts < ? AND end_ts > ?
+                GROUP  BY app_or_domain
+                ORDER  BY total_secs DESC
+                LIMIT  ?
+            """, arguments: [endMs, startMs, endMs, startMs, max(0, limit)])
+            return rows.map { AppStat(appOrDomain: $0["app_or_domain"], totalSecs: $0["total_secs"]) }
+        }
+    }
+
+    func topURLs(startMs: Int64, endMs: Int64, limit: Int = 10) throws -> [(url: String, totalSecs: Double)] {
+        try db.read { d in
+            let rows = try Row.fetchAll(d, sql: """
+                SELECT url,
+                       SUM((MIN(end_ts, ?) - MAX(start_ts, ?)) / 1000.0) AS total_secs
+                FROM   events INDEXED BY idx_events_end_ts
+                WHERE  start_ts < ? AND end_ts > ?
+                  AND  url IS NOT NULL AND url != ''
+                GROUP  BY url
+                ORDER  BY total_secs DESC
+                LIMIT  ?
+            """, arguments: [endMs, startMs, endMs, startMs, limit])
+            return rows.map { (url: $0["url"] as String, totalSecs: $0["total_secs"] as Double) }
+        }
     }
 }

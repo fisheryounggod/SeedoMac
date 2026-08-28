@@ -107,21 +107,51 @@ final class AppDatabase {
         }
 
         migrator.registerMigration("v4_unify_storage") { db in
-            // 1. Update work_sessions table
-            try db.execute(sql: "ALTER TABLE work_sessions ADD COLUMN is_manual INTEGER NOT NULL DEFAULT 0")
-            try db.execute(sql: "ALTER TABLE work_sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''")
-
-            // 2. Migrate data from offline_activities
+            // 1. Create work_sessions if it doesn't exist
             try db.execute(sql: """
-                INSERT INTO work_sessions (start_ts, end_ts, top_apps_json, summary, outcome, created_at, is_manual, title)
-                SELECT start_ts, (start_ts + duration_secs * 1000), '[]', '', 'completed', created_at, 1, label
-                FROM offline_activities
+                CREATE TABLE IF NOT EXISTS work_sessions (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    start_ts      INTEGER NOT NULL,
+                    end_ts        INTEGER NOT NULL,
+                    top_apps_json TEXT NOT NULL DEFAULT '[]',
+                    summary       TEXT NOT NULL DEFAULT '',
+                    outcome       TEXT NOT NULL DEFAULT 'completed',
+                    created_at    INTEGER NOT NULL
+                );
             """)
 
+            // 1.1 Add columns safely
+            let columns = try db.columns(in: "work_sessions")
+            if !columns.contains(where: { $0.name == "is_manual" }) {
+                try db.execute(sql: "ALTER TABLE work_sessions ADD COLUMN is_manual INTEGER NOT NULL DEFAULT 0")
+            }
+            if !columns.contains(where: { $0.name == "title" }) {
+                try db.execute(sql: "ALTER TABLE work_sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+            }
+            if !columns.contains(where: { $0.name == "category_id" }) {
+                try db.execute(sql: "ALTER TABLE work_sessions ADD COLUMN category_id TEXT")
+            }
+
+            // 2. Migrate data from offline_activities
+            if try db.tableExists("offline_activities") {
+                try db.execute(sql: """
+                    INSERT INTO work_sessions (start_ts, end_ts, top_apps_json, summary, outcome, created_at, is_manual, title)
+                    SELECT start_ts, (start_ts + duration_secs * 1000), '[]', '', 'completed', created_at, 1, label
+                    FROM offline_activities
+                """)
+                try db.execute(sql: "DROP TABLE offline_activities")
+            }
+
             // 3. Drop old tables
-            try db.execute(sql: "DROP TABLE offline_activities")
-            try db.execute(sql: "DROP TABLE categories")
-            try db.execute(sql: "DROP TABLE category_rules")
+            if try db.tableExists("categories") {
+                let catCols = try db.columns(in: "categories")
+                if catCols.contains(where: { $0.name == "rules" }) {
+                    try db.execute(sql: "DROP TABLE categories")
+                }
+            }
+            if try db.tableExists("category_rules") {
+                try db.execute(sql: "DROP TABLE category_rules")
+            }
         }
 
         migrator.registerMigration("v6_dynamic_categories") { db in
@@ -137,6 +167,19 @@ final class AppDatabase {
                 INSERT OR IGNORE INTO categories (id, name, color, display_order) VALUES ('daily', '日常事务', '#52C41A', 1);
                 INSERT OR IGNORE INTO categories (id, name, color, display_order) VALUES ('distraction', '其他干扰', '#F5222D', 2);
             """)
+        }
+
+        migrator.registerMigration("v7_long_running_performance_indexes") { db in
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS idx_events_end_ts ON events(end_ts);
+                CREATE INDEX IF NOT EXISTS idx_events_start_end ON events(start_ts, end_ts);
+                CREATE INDEX IF NOT EXISTS idx_work_sessions_start_ts ON work_sessions(start_ts);
+                CREATE INDEX IF NOT EXISTS idx_work_sessions_category_start ON work_sessions(category_id, start_ts);
+            """)
+        }
+
+        migrator.registerMigration("v8_remove_misleading_event_app_index") { db in
+            try db.execute(sql: "DROP INDEX IF EXISTS idx_events_app")
         }
 
         try migrator.migrate(pool)
@@ -189,6 +232,27 @@ final class AppDatabase {
     func exactDailyPlan(for dateString: String) -> String {
         let key = "plan_daily:\(dateString)"
         return setting(for: key) ?? ""
+    }
+
+    func exactDailyPlans(from startDate: String, through endDate: String) -> [String: String] {
+        let prefix = "plan_daily:"
+        do {
+            return try read { db in
+                let rows = try Row.fetchAll(db, sql: """
+                    SELECT key, value FROM settings
+                    WHERE key >= ? AND key <= ? AND key LIKE 'plan_daily:%'
+                """, arguments: [prefix + startDate, prefix + endDate])
+                return Dictionary(uniqueKeysWithValues: rows.compactMap { row in
+                    let key: String = row["key"]
+                    let value: String = row["value"]
+                    guard key.hasPrefix(prefix) else { return nil }
+                    return (String(key.dropFirst(prefix.count)), value)
+                })
+            }
+        } catch {
+            print("[AppDatabase] Failed to load daily plans: \(error)")
+            return [:]
+        }
     }
 
     /// Returns the daily plan for a specific date string (yyyy-MM-dd).

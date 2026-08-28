@@ -62,6 +62,8 @@ struct StatsView: View {
     }
     
     @State private var historyItems: [LogItem] = []
+    @State private var historicalDailyPlans: [String: String] = [:]
+    @State private var periodLoadID = UUID()
     @State private var isLoadingAI = false
     @State private var summary: DailySummary?
     @State private var pendingSummary: DailySummary? = nil
@@ -108,6 +110,8 @@ struct StatsView: View {
     // AI Analysis & Draft
     @State private var aiDraftContent: String = ""
     @State private var isSavingDraft: Bool = false
+    @State private var draftSaveTask: DispatchWorkItem? = nil
+    @State private var isLoadingDraft: Bool = false
     
     // Historical Plan Editing
     @State private var editingPlanDate: String? = nil
@@ -278,7 +282,6 @@ struct StatsView: View {
             .padding()
             .frame(width: 350)
         }
-        .onChange(of: period) { _ in loadPeriodData() }
         .onChange(of: customStart) { _ in if period == .custom { loadPeriodData() } }
         .onChange(of: customEnd)   { _ in if period == .custom { loadPeriodData() } }
 
@@ -875,7 +878,7 @@ struct StatsView: View {
                                     .font(.caption2.bold())
                                     .foregroundStyle(.secondary)
                                 
-                                let plan = AppDatabase.shared.exactDailyPlan(for: date)
+                                let plan = historicalDailyPlans[date] ?? ""
                                 if !plan.isEmpty {
                                     Text("日度计划：\(plan)")
                                         .font(.system(size: 9))
@@ -1007,6 +1010,8 @@ struct StatsView: View {
     private func saveAIDraft() {
         guard !aiDraftContent.isEmpty else { return }
         isSavingDraft = true
+        draftSaveTask?.cancel()
+        draftSaveTask = nil
         
         let dateKey = periodKey()
         let sum = DailySummary(
@@ -1057,21 +1062,34 @@ struct StatsView: View {
     }
 
     private func saveDraftToSettings(_ content: String) {
-        // Prevent clearing legitimate content due to race conditions during initial load
-        guard !content.isEmpty || isSavingDraft else { return }
+        guard !isLoadingDraft else { return }
         let key = "draft_review_\(periodKey())"
-        AppDatabase.shared.saveSetting(key: key, value: content)
+
+        draftSaveTask?.cancel()
+        let task = DispatchWorkItem {
+            DispatchQueue.global(qos: .utility).async {
+                AppDatabase.shared.saveSetting(key: key, value: content)
+            }
+        }
+        draftSaveTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: task)
     }
 
     private func loadAIDraft() {
         let key = "draft_review_\(periodKey())"
+        let shouldFallbackToLatestSummary = period == .today
+        isLoadingDraft = true
+
         DispatchQueue.global(qos: .userInitiated).async {
             var content = AppDatabase.shared.setting(for: key) ?? ""
-            if content.isEmpty && period == .today {
+            if content.isEmpty && shouldFallbackToLatestSummary {
                 content = AppDatabase.shared.latestSummary()
             }
             DispatchQueue.main.async {
                 self.aiDraftContent = content
+                DispatchQueue.main.async {
+                    self.isLoadingDraft = false
+                }
             }
         }
     }
@@ -1385,12 +1403,6 @@ struct StatsView: View {
             do {
                 var s = session
                 try WorkSessionStore().insert(&s)
-                // Also sync to calendar if enabled
-                CalendarSyncService.shared.sync(session: s)
-                // Auto-export to Obsidian if enabled
-                if AppDatabase.shared.setting(for: "obsidian_export_sessions") == "true" {
-                    try? ObsidianImporter.shared.appendSession(s)
-                }
                 
                 DispatchQueue.main.async {
                     loadData()
@@ -1508,6 +1520,12 @@ struct StatsView: View {
 
     private func loadPeriodData() {
         let (startMs, endMs) = periodRange()
+        let loadID = UUID()
+        periodLoadID = loadID
+        let startDate = Self.dateFormatter.string(from: Date(timeIntervalSince1970: Double(startMs) / 1000))
+        let inclusiveEndMs = max(startMs, endMs - 1)
+        let endDate = Self.dateFormatter.string(from: Date(timeIntervalSince1970: Double(inclusiveEndMs) / 1000))
+
         DispatchQueue.global(qos: .userInitiated).async {
             // Raw apps
             let apps = (try? EventStore().topApps(startMs: startMs, endMs: endMs, limit: 15)) ?? []
@@ -1515,9 +1533,12 @@ struct StatsView: View {
             let sessions = (try? WorkSessionStore().sessions(from: startMs, to: endMs)) ?? []
             // Summaries for the range
             let summaries = (try? WorkSessionStore().summaries(from: startMs, to: endMs)) ?? []
+            let plans = AppDatabase.shared.exactDailyPlans(from: startDate, through: endDate)
 
             DispatchQueue.main.async {
+                guard self.periodLoadID == loadID else { return }
                 self.periodApps = apps
+                self.historicalDailyPlans = plans
                 
                 // Unified history
                 var items: [LogItem] = sessions.map { .session($0) }

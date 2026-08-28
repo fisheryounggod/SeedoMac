@@ -4,9 +4,26 @@ import Combine
 
 final class BreakScheduler: ObservableObject {
     static let shared = BreakScheduler()
+
+    enum TimerMode: String {
+        case countdown
+        case stopwatch
+    }
+
+    enum FocusSurface {
+        case normal
+        case deepFocus
+    }
     
     @Published var workElapsedSecsDetailed: Double = 0
     var workElapsedSecs: Int { Int(workElapsedSecsDetailed) }
+
+    @Published var timerMode: TimerMode = .countdown {
+        didSet {
+            UserDefaults.standard.set(timerMode.rawValue, forKey: kTimerModeKey)
+        }
+    }
+    @Published private(set) var focusSurface: FocusSurface = .normal
     
     var workIntervalSecs: Double {
         Double(config.workIntervalMins * 60)
@@ -18,7 +35,6 @@ final class BreakScheduler: ObservableObject {
     private var afkStartTs: Date?
     @Published var isBreakInProgress = false
     private var postponedOnce = false
-    @Published var isDeepFocusActive: Bool = false
     @Published var isFocusActive: Bool = true // Enabled by default as "Normal Mode"
     
     /// Tracks how many focus sessions have been completed since the last long break.
@@ -44,6 +60,30 @@ final class BreakScheduler: ObservableObject {
     var isLongBreak: Bool {
         guard config.isLongBreakEnabled else { return false }
         return sessionsSinceLongBreak >= config.longBreakFrequency - 1
+    }
+
+    var remainingSecs: Int {
+        max(0, Int(ceil(workIntervalSecs - workElapsedSecsDetailed)))
+    }
+
+    var totalElapsedSecs: Double {
+        workElapsedSecsDetailed + accumulatedWorkSecs
+    }
+
+    var currentSessionStartTs: Int64 {
+        sessionStartTs ?? Int64((Date().timeIntervalSince1970 - totalElapsedSecs) * 1000)
+    }
+
+    func enterDeepFocusSurface() {
+        focusSurface = .deepFocus
+    }
+
+    func exitDeepFocusSurface() {
+        focusSurface = .normal
+    }
+
+    func toggleTimerMode() {
+        timerMode = timerMode == .countdown ? .stopwatch : .countdown
     }
  
     private func setupObservers() {
@@ -88,9 +128,6 @@ final class BreakScheduler: ObservableObject {
                 "endTs": Int64(end.timeIntervalSince1970 * 1000)
             ]
         )
-        
-        // Reset the timer as requested ("restart timing")
-        self.resetWork()
     }
     
     private func startTimer() {
@@ -104,12 +141,17 @@ final class BreakScheduler: ObservableObject {
     
     private func tick() {
         // Only tick if focus is active, tracking is on, and break isn't in progress
-        guard isFocusActive && AppState.shared.isTracking else { return }
-        guard !isBreakInProgress else { return }
+        guard isFocusActive && AppState.shared.isTracking else {
+            return
+        }
         
-        // Even if disabled today from automatic break reminders, 
-        // we still track "Focus Time" for the MenuBar ring.
-        // But if enabled, we also check for break thresholds.
+        if isBreakInProgress {
+            // Log once every minute if stuck in break mode
+            if Int(Date().timeIntervalSince1970) % 60 == 0 {
+                print("[BreakScheduler] Tick skipped: isBreakInProgress is true")
+            }
+            return
+        }
         
         if !isAFK {
             if workElapsedSecsDetailed == 0 && accumulatedWorkSecs == 0 {
@@ -122,11 +164,14 @@ final class BreakScheduler: ObservableObject {
                 savePersistence()
             }
             
-            if config.isEnabledToday {
-                let threshold = Double(config.workIntervalMins * 60)
-                if workElapsedSecsDetailed >= threshold {
-                    triggerBreak()
-                }
+            let threshold = Double(config.workIntervalMins * 60)
+            if timerMode == .countdown && workElapsedSecsDetailed >= threshold {
+                triggerBreak()
+            }
+        } else {
+            // Log once every minute if stuck in AFK mode
+            if Int(Date().timeIntervalSince1970) % 60 == 0 {
+                print("[BreakScheduler] Tick skipped: isAFK is true")
             }
         }
     }
@@ -183,10 +228,7 @@ final class BreakScheduler: ObservableObject {
         )
         try? WorkSessionStore().insert(&session)
         NotificationCenter.default.post(name: .workSessionDidSave, object: nil)
-        
-        // Sync to Calendar
-        CalendarSyncService.shared.sync(session: session)
-        
+
         // Update session tracking
         if outcome == "completed" {
             if isLongBreak {
@@ -223,12 +265,49 @@ final class BreakScheduler: ObservableObject {
         savePersistence()
     }
     
-    func disableToday() {
-        AppDatabase.shared.saveSetting(key: "break_disabled_day", 
-                                      value: DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none))
-        refreshConfig()
+    func pauseTracking() {
+        DispatchQueue.main.async {
+            AppState.shared.isTracking = false
+        }
         resetWork()
         isBreakInProgress = false
+    }
+
+    func stopAndRecordCurrentSession(
+        title: String,
+        summary: String,
+        categoryId: String?,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        let startTs = currentSessionStartTs
+        let endTs = Int64(Date().timeIntervalSince1970 * 1000)
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            var session = WorkSession(
+                startTs: startTs,
+                endTs: endTs,
+                topAppsJson: self.fetchTopAppsJson(start: startTs, end: endTs),
+                summary: summary,
+                outcome: "completed",
+                createdAt: endTs,
+                isManual: true,
+                title: title,
+                categoryId: categoryId
+            )
+
+            do {
+                try WorkSessionStore().insert(&session)
+                DispatchQueue.main.async {
+                    self.resetWork()
+                    NotificationCenter.default.post(name: .workSessionDidSave, object: nil)
+                    completion(.success(()))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    completion(.failure(error))
+                }
+            }
+        }
     }
     
     func resetWork() {
@@ -239,24 +318,38 @@ final class BreakScheduler: ObservableObject {
         lastSkippedCategoryId = nil
         sessionStartTs = nil
         postponedOnce = false
+        isBreakInProgress = false
         clearPersistence()
     }
     
     // MARK: - Persistence
     
     private let kElapsedKey = "focus_timer_elapsed"
+    private let kAccumulatedKey = "focus_timer_accumulated"
+    private let kSessionStartKey = "focus_timer_session_start"
     private let kPostponedKey = "focus_timer_postponed"
     private let kLastSavedKey = "focus_timer_last_saved"
+    private let kTimerModeKey = "focus_timer_mode"
 
     private func savePersistence() {
         let defaults = UserDefaults.standard
         defaults.set(workElapsedSecsDetailed, forKey: kElapsedKey)
+        defaults.set(accumulatedWorkSecs, forKey: kAccumulatedKey)
+        if let sessionStartTs {
+            defaults.set(sessionStartTs, forKey: kSessionStartKey)
+        } else {
+            defaults.removeObject(forKey: kSessionStartKey)
+        }
         defaults.set(postponedOnce, forKey: kPostponedKey)
         defaults.set(Int64(Date().timeIntervalSince1970), forKey: kLastSavedKey)
     }
     
     private func loadPersistence() {
         let defaults = UserDefaults.standard
+        if let rawMode = defaults.string(forKey: kTimerModeKey),
+           let savedMode = TimerMode(rawValue: rawMode) {
+            timerMode = savedMode
+        }
         let lastSaved = defaults.integer(forKey: kLastSavedKey)
         let now = Int64(Date().timeIntervalSince1970)
         
@@ -264,6 +357,10 @@ final class BreakScheduler: ObservableObject {
         // This prevents resuming a session from yesterday.
         if lastSaved > 0 && (now - Int64(lastSaved)) < (4 * 3600) {
             self.workElapsedSecsDetailed = defaults.double(forKey: kElapsedKey)
+            self.accumulatedWorkSecs = defaults.double(forKey: kAccumulatedKey)
+            let savedStartTs = defaults.object(forKey: kSessionStartKey) as? NSNumber
+            self.sessionStartTs = savedStartTs?.int64Value
+                ?? Int64((Date().timeIntervalSince1970 - totalElapsedSecs) * 1000)
             self.postponedOnce = defaults.bool(forKey: kPostponedKey)
             print("[BreakScheduler] Recovered session: \(workElapsedSecsDetailed)s elapsed")
         }
@@ -272,6 +369,8 @@ final class BreakScheduler: ObservableObject {
     private func clearPersistence() {
         let defaults = UserDefaults.standard
         defaults.removeObject(forKey: kElapsedKey)
+        defaults.removeObject(forKey: kAccumulatedKey)
+        defaults.removeObject(forKey: kSessionStartKey)
         defaults.removeObject(forKey: kPostponedKey)
         defaults.removeObject(forKey: kLastSavedKey)
     }

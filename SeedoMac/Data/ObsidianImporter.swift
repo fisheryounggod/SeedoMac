@@ -137,7 +137,7 @@ final class ObsidianImporter {
                 title: entry.title,
                 categoryId: entry.categoryId
             )
-            try store.insert(&session)
+            try store.insert(&session, syncToObsidian: false)
             inserted += 1
         }
         return inserted
@@ -182,6 +182,7 @@ final class ObsidianImporter {
     /// Appends a work session record to today's Obsidian daily note.
     /// Format: `- HH:mm #seedo Title花了X分钟，summary`
     func appendSession(_ session: WorkSession) throws {
+        guard SessionCategory.find(session.categoryId).id != "none" else { return }
         guard let vault = AppDatabase.shared.setting(for: "obsidian_vault_path"),
               !vault.isEmpty else { return }
 

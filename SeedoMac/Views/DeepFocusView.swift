@@ -1,29 +1,13 @@
 import SwiftUI
-import AVFoundation
 
 struct DeepFocusView: View {
     @ObservedObject var appState: AppState
-    
-    enum FocusMode {
-        case countdown
-        case stopwatch
-    }
     
     let onClose: () -> Void
     let isPrimary: Bool
     
     @ObservedObject var scheduler = BreakScheduler.shared
-    @State private var player: AVAudioPlayer?
-    
-    // Timer State
-    @State private var mode: FocusMode = .countdown
-    @State private var remainingSecs: Int = 25 * 60
-    @State private var elapsedSecs: Int = 0
-    @State private var isPaused: Bool = false
-    @State private var timer: Timer? = nil
-    
-    // Session Tracking
-    @State private var sessionStartTs: Int64? = nil
+
     @State private var showingLogOverlay = false
     @State private var sessionTitle: String = ""
     @State private var selectedCategoryId: String = "focus"
@@ -32,10 +16,6 @@ struct DeepFocusView: View {
     @FocusState private var isNoteFocused: Bool
     
     // UI Logic
-    @State private var showingExitConfirmation = false
-    
-    private let defaultCountdownSecs = 25 * 60
-    
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -59,9 +39,9 @@ struct DeepFocusView: View {
                             .frame(width: 30)
 
                         Button(action: {
-                            setMode(mode == .countdown ? .stopwatch : .countdown)
+                            scheduler.toggleTimerMode()
                         }) {
-                            Text(mode == .countdown ? "蕃茄钟" : "正计时")
+                            Text(scheduler.timerMode == .countdown ? "番茄钟" : "正计时")
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 6)
                                 .background(Color.white.opacity(0.1))
@@ -70,26 +50,20 @@ struct DeepFocusView: View {
                         }
                         .font(.system(size: 11, weight: .bold))
                         .buttonStyle(.plain)
+                        .help(scheduler.timerMode == .countdown ? "切换为正计时" : "切换为倒计时")
                     }
                     
                     Spacer()
                     
                     Button(action: {
-                        if showingLogOverlay {
-                            onClose()
-                        } else {
-                            showingExitConfirmation = true
-                        }
+                        onClose()
                     }) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 30))
                             .foregroundStyle(.white.opacity(0.3))
                     }
                     .buttonStyle(.plain)
-                    .confirmationDialog("确定要中途退出吗？当前记录将不被保存。", isPresented: $showingExitConfirmation) {
-                        Button("确认退出", role: .destructive) { onClose() }
-                        Button("取消", role: .cancel) { }
-                    }
+                    .help("退出纯专注模式，计时继续")
                 }
                 .padding()
                 
@@ -101,38 +75,41 @@ struct DeepFocusView: View {
                         .stroke(Color.white.opacity(0.05), lineWidth: 20)
                     
                     let progress: Double = {
-                        if mode == .countdown {
-                            return 1.0 - (Double(remainingSecs) / Double(defaultCountdownSecs))
+                        if scheduler.timerMode == .countdown {
+                            return min(1.0, scheduler.workElapsedSecsDetailed / max(1.0, scheduler.workIntervalSecs))
                         } else {
-                            return 1.0 // Simple circle for stopwatch
+                            return 1.0
                         }
                     }()
                     
                     Circle()
                         .trim(from: 0, to: progress)
-                        .stroke(mode == .countdown ? Color.red.opacity(0.8) : Color.blue.opacity(0.8), 
+                        .stroke(scheduler.timerMode == .countdown ? Color.red.opacity(0.8) : Color.blue.opacity(0.8),
                                 style: StrokeStyle(lineWidth: 20, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                         .animation(.linear, value: progress)
                     
                     VStack(spacing: 10) {
-                        let displaySecs = mode == .countdown ? remainingSecs : elapsedSecs
+                        let displaySecs = scheduler.timerMode == .countdown
+                            ? scheduler.remainingSecs
+                            : scheduler.workElapsedSecs
                         Text(formatTime(displaySecs))
                             .font(.system(size: 120, weight: .bold, design: .monospaced))
                             .foregroundStyle(.white)
                         
-                        Text(mode == .countdown ? "剩余时间" : "专注用时")
+                        Text(scheduler.timerMode == .countdown ? "剩余时间" : "专注用时")
                             .font(.caption)
                             .tracking(4)
                             .foregroundStyle(.secondary)
                         
                         HStack(spacing: 20) {
-                            Button(action: { isPaused.toggle() }) {
-                                Image(systemName: isPaused ? "play.fill" : "pause.fill")
+                            Button(action: { appState.isTracking.toggle() }) {
+                                Image(systemName: appState.isTracking ? "pause.fill" : "play.fill")
                                     .font(.title)
                                     .foregroundStyle(.white.opacity(0.6))
                             }
                             .buttonStyle(.plain)
+                            .help(appState.isTracking ? "暂停计时" : "继续计时")
                         }
                         .padding(.top, 10)
                     }
@@ -159,6 +136,7 @@ struct DeepFocusView: View {
             }
             .padding()
             .blur(radius: showingLogOverlay ? 10 : 0)
+            }
             
             // Logging Overlay (Unchanged structure, but pre-filled duration if needed)
             if showingLogOverlay {
@@ -226,7 +204,8 @@ struct DeepFocusView: View {
                     .padding(.bottom, 10)
                     
                     HStack(spacing: 20) {
-                        Button("直接退出") {
+                        Button("放弃记录并停止") {
+                            scheduler.resetWork()
                             onClose()
                         }
                         .buttonStyle(.plain)
@@ -255,48 +234,14 @@ struct DeepFocusView: View {
                 .transition(.scale.combined(with: .opacity))
             }
         }
-    }
-    .onAppear {
-        playDingDing()
-        startInternalTimer()
-        sessionStartTs = Int64(Date().timeIntervalSince1970 * 1000)
-    }
-    .onDisappear {
-            timer?.invalidate()
+        .onAppear {
+            playDingDing()
         }
         .onChange(of: showingLogOverlay) { newValue in
             if newValue {
-                timer?.invalidate()
                 playDingDing()
-                // Reduced delay for snappier focus
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                     isNoteFocused = true
-                }
-            }
-        }
-    }
-    
-    private func setMode(_ next: FocusMode) {
-        mode = next
-        remainingSecs = defaultCountdownSecs
-        elapsedSecs = 0
-        isPaused = false // Ensure it's never paused when switching
-        startInternalTimer() // Restart timer immediately
-    }
-    
-    private func startInternalTimer() {
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-            guard !isPaused && !showingLogOverlay else { return }
-            
-            elapsedSecs += 1
-            if mode == .countdown {
-                if remainingSecs > 0 {
-                    remainingSecs -= 1
-                } else {
-                    withAnimation {
-                        showingLogOverlay = true
-                    }
                 }
             }
         }
@@ -310,45 +255,26 @@ struct DeepFocusView: View {
     }
     
     private func handleManualStop() {
+        appState.isTracking = false
         withAnimation {
             showingLogOverlay = true
         }
     }
     
     private func saveAndExit() {
-        guard let start = sessionStartTs else { return }
         isSaving = true
-        
-        let endMs = Int64(Date().timeIntervalSince1970 * 1000)
-        let durationSecs = Double(elapsedSecs)
-        
-        var session = WorkSession(
-            startTs: start,
-            endTs: endMs,
-            topAppsJson: "[]",
-            summary: sessionSummary,
-            outcome: "completed",
-            createdAt: endMs,
-            isManual: true,
+
+        scheduler.stopAndRecordCurrentSession(
             title: sessionTitle.trimmingCharacters(in: .whitespaces),
+            summary: sessionSummary,
             categoryId: selectedCategoryId
-        )
-        // Ensure duration is correctly set based on timer
-        // WorkSession doesn't have duration directly stored in all versions, 
-        // but let's assume endTs - startTs is used, or there's a durationSecs field.
-        // Actually endTs - startTs usually defines it.
-        
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                try WorkSessionStore().insert(&session)
-                CalendarSyncService.shared.sync(session: session)
-                
-                DispatchQueue.main.async {
-                    onClose()
-                }
-            } catch {
+        ) { result in
+            switch result {
+            case .success:
+                onClose()
+            case .failure(let error):
                 print("[DeepFocus] Save failed: \(error)")
-                DispatchQueue.main.async { isSaving = false }
+                isSaving = false
             }
         }
     }

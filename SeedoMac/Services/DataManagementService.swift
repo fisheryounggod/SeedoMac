@@ -55,10 +55,12 @@ final class DataManagementService {
     
     /// Performs a silent export to a specified URL without showing any UI panels.
     func performSilentExport(to url: URL, completion: @escaping (Result<URL, Error>) -> Void) {
-        generateExportData { result in
+        generateExportData { [weak self] result in
+            guard let self = self else { return }
             switch result {
             case .success(let data):
                 do {
+                    self.cleanupOldBackups(at: url, keepCount: 5)
                     // Ensure the filename is included
                     let fileURL = url.appendingPathComponent("SeedoAutoBackup_\(self.dateString(Date())).json")
                     try data.write(to: fileURL)
@@ -69,6 +71,30 @@ final class DataManagementService {
             case .failure(let error):
                 completion(.failure(error))
             }
+        }
+    }
+
+    private func cleanupOldBackups(at url: URL, keepCount: Int) {
+        let fm = FileManager.default
+        do {
+            let files = try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: [.creationDateKey])
+            let backupFiles = files.filter { $0.lastPathComponent.hasPrefix("SeedoAutoBackup_") && $0.pathExtension == "json" }
+            
+            let sortedBackups = try backupFiles.sorted {
+                let attrs1 = try $0.resourceValues(forKeys: [.creationDateKey])
+                let attrs2 = try $1.resourceValues(forKeys: [.creationDateKey])
+                let date1 = attrs1.creationDate ?? Date.distantPast
+                let date2 = attrs2.creationDate ?? Date.distantPast
+                return date1 > date2 // Descending, newest first
+            }
+            
+            if sortedBackups.count >= keepCount {
+                for fileToRemove in sortedBackups.dropFirst(keepCount - 1) {
+                    try? fm.removeItem(at: fileToRemove)
+                }
+            }
+        } catch {
+            print("Failed to cleanup old backups: \(error)")
         }
     }
     

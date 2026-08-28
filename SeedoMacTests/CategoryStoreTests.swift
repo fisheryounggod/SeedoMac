@@ -1,57 +1,68 @@
-// SeedoMacTests/CategoryStoreTests.swift
 import XCTest
 import GRDB
 @testable import SeedoMac
 
 final class CategoryStoreTests: XCTestCase {
     var db: DatabaseQueue!
-    var store: CategoryStore!
 
     override func setUp() {
+        super.setUp()
         db = try! DatabaseQueue()
-        try! db.write { d in
-            try d.execute(sql: """
+        try! db.write { database in
+            try database.execute(sql: """
                 CREATE TABLE categories (
-                    id TEXT PRIMARY KEY, name TEXT NOT NULL,
-                    color TEXT NOT NULL DEFAULT '#4A90D9', rules TEXT NOT NULL DEFAULT '[]'
-                );
-                CREATE TABLE category_rules (
-                    app_or_domain TEXT PRIMARY KEY, category_id TEXT NOT NULL
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    color TEXT NOT NULL,
+                    display_order INTEGER NOT NULL DEFAULT 0
                 );
             """)
         }
-        store = CategoryStore(db: db)
     }
 
-    func test_saveAndFetch() throws {
-        let cat = Category(id: "work", name: "Work", color: "#00FF00", rules: "[]")
-        try store.save(cat)
-        let all = try store.allCategories()
-        XCTAssertEqual(all.count, 1)
-        XCTAssertEqual(all[0].name, "Work")
+    func test_saveAndFetchCategory() throws {
+        var category = SessionCategory(id: "work", name: "工作", colorHex: "#00FF00", displayOrder: 1)
+        try db.write { database in try category.insert(database) }
+
+        let fetched = try db.read { database in
+            try SessionCategory.fetchOne(database, key: "work")
+        }
+        XCTAssertEqual(fetched?.name, "工作")
+        XCTAssertEqual(fetched?.colorHex, "#00FF00")
     }
 
-    func test_matchCategory_byAppName() throws {
-        let rules = #"[{"field":"app","op":"contains","value":"Xcode"}]"#
-        let cat = Category(id: "work", name: "Work", color: "#00FF00", rules: rules)
-        try store.save(cat)
-        let matched = try store.matchCategory(for: "Xcode", title: "")
-        XCTAssertEqual(matched?.id, "work")
+    func test_updateCategory() throws {
+        var category = SessionCategory(id: "work", name: "工作", colorHex: "#00FF00")
+        try db.write { database in try category.insert(database) }
+        category.name = "深度工作"
+        try db.write { database in try category.update(database) }
+
+        let fetched = try db.read { database in
+            try SessionCategory.fetchOne(database, key: "work")
+        }
+        XCTAssertEqual(fetched?.name, "深度工作")
     }
 
-    func test_matchCategory_noMatch_returnsNil() throws {
-        let rules = #"[{"field":"app","op":"contains","value":"Xcode"}]"#
-        let cat = Category(id: "work", name: "Work", color: "#00FF00", rules: rules)
-        try store.save(cat)
-        let matched = try store.matchCategory(for: "Safari", title: "")
-        XCTAssertNil(matched)
+    func test_categoriesSortByDisplayOrder() throws {
+        var later = SessionCategory(id: "later", name: "稍后", colorHex: "#000000", displayOrder: 2)
+        var first = SessionCategory(id: "first", name: "优先", colorHex: "#FFFFFF", displayOrder: 0)
+        try db.write { database in
+            try later.insert(database)
+            try first.insert(database)
+        }
+
+        let categories = try db.read { database in
+            try SessionCategory.order(Column("display_order").asc).fetchAll(database)
+        }
+        XCTAssertEqual(categories.map(\.id), ["first", "later"])
     }
 
-    func test_delete_removesCategory() throws {
-        let cat = Category(id: "work", name: "Work", color: "#00FF00", rules: "[]")
-        try store.save(cat)
-        try store.delete(id: "work")
-        let all = try store.allCategories()
-        XCTAssertTrue(all.isEmpty)
+    func test_deleteCategory() throws {
+        var category = SessionCategory(id: "work", name: "工作", colorHex: "#00FF00")
+        try db.write { database in try category.insert(database) }
+        try db.write { database in _ = try SessionCategory.deleteOne(database, key: "work") }
+
+        let count = try db.read { database in try SessionCategory.fetchCount(database) }
+        XCTAssertEqual(count, 0)
     }
 }

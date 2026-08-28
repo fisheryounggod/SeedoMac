@@ -169,7 +169,7 @@ struct HeatmapDay: Identifiable {
 struct SessionCategory: Identifiable, Hashable, Codable, FetchableRecord, MutablePersistableRecord {
     var id: String
     var name: String
-    private var colorHex: String
+    var colorHex: String
     var displayOrder: Int = 0
     
     var color: Color { Color(hex: colorHex) }
@@ -190,10 +190,35 @@ struct SessionCategory: Identifiable, Hashable, Codable, FetchableRecord, Mutabl
         case displayOrder = "display_order"
     }
     
+    private static let cacheLock = NSLock()
+    private static var cachedCategories: [SessionCategory] = []
+    private static var cacheLoadedAt = Date.distantPast
+    private static let cacheLifetime: TimeInterval = 5
+
     static var all: [SessionCategory] {
-        (try? AppDatabase.shared.read { db in
+        cacheLock.lock()
+        if Date().timeIntervalSince(cacheLoadedAt) < cacheLifetime {
+            let cached = cachedCategories
+            cacheLock.unlock()
+            return cached
+        }
+        cacheLock.unlock()
+
+        let loaded = (try? AppDatabase.shared.read { db in
             try SessionCategory.order(Column("display_order").asc).fetchAll(db)
         }) ?? []
+
+        cacheLock.lock()
+        cachedCategories = loaded
+        cacheLoadedAt = Date()
+        cacheLock.unlock()
+        return loaded
+    }
+
+    static func invalidateCache() {
+        cacheLock.lock()
+        cacheLoadedAt = .distantPast
+        cacheLock.unlock()
     }
     
     static func find(_ id: String?) -> SessionCategory {

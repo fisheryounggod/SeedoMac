@@ -20,12 +20,13 @@ struct SettingsView: View {
     @State private var obsidianImportStatus: String? = nil
     @State private var autoSummaryEnabled: Bool = false
     @State private var autoSummaryTime: Date = SettingsView.defaultAutoSummaryTime()
+    @State private var breakPreAIEnabled: Bool = false
     @State private var breakWorkInterval: Int = 45
     @State private var breakDuration: Int = 5
     @State private var breakLongDuration: Int = 15
     @State private var breakLongFrequency: Int = 4
     @State private var breakLongEnabled: Bool = true
-    @State private var breakEnabledToday: Bool = true
+
     @State private var breakBackgroundColor: Color = .black
     @State private var breakBackgroundImagePath: String = ""
     @State private var calendarSyncEnabled: Bool = false
@@ -52,10 +53,7 @@ struct SettingsView: View {
                 Toggle("开机自启", isOn: $autostartEnabled)
                     .onChange(of: autostartEnabled) { toggleAutostart($0) }
                 
-                Toggle("今日启用休息提醒", isOn: $breakEnabledToday)
-                    .onChange(of: breakEnabledToday) { _ in
-                        saveSettings()
-                    }
+
 
                 Toggle("开启专注时同步系统专注模式 (DND)", isOn: $enableMacFocusMode)
                     .help("在专注时间（包含 Deep Focus）自动打开系统勿扰模式，并在休息时间自动恢复")
@@ -158,6 +156,8 @@ struct SettingsView: View {
                             DatePicker("执行时间", selection: $autoSummaryTime, displayedComponents: [.hourAndMinute])
                                 .datePickerStyle(.compact)
                         }
+                        Toggle("休息前自动生成 AI 总结", isOn: $breakPreAIEnabled)
+                            .help("弹出休息窗口时自动调用 AI 生成本次专注总结")
                     }
                     .padding(.vertical, 8)
                 }
@@ -340,7 +340,10 @@ struct SettingsView: View {
                                     get: { cat.color },
                                     set: { updateCategoryColor(id: cat.id, newHex: colorToHex($0)) }
                                 )).labelsHidden().frame(width: 30)
-                                TextField("名称", text: $cat.name).textFieldStyle(.plain).onSubmit { saveCategory(cat) }
+                                TextField("名称", text: $cat.name)
+                                    .textFieldStyle(.plain)
+                                    .onSubmit { saveCategory(cat) }
+                                    .onChange(of: cat.name) { _ in saveCategory(cat) }
                                 Button { deleteCategory(cat) } label: { Image(systemName: "trash").foregroundStyle(.red) }.buttonStyle(.plain)
                             }
                         }
@@ -449,6 +452,7 @@ struct SettingsView: View {
         obsidianImportRegex = AppDatabase.shared.setting(for: "obsidian_import_regex") ?? defaultRegex
         obsidianExportSessions = (AppDatabase.shared.setting(for: "obsidian_export_sessions") == "true")
         autoSummaryEnabled = (AppDatabase.shared.setting(for: "auto_summary_enabled") == "true")
+        breakPreAIEnabled = (AppDatabase.shared.setting(for: "break_pre_ai_enabled") == "true")
         autoSummaryTime = Self.parseTimeOfDay(
             hour: AppDatabase.shared.setting(for: "auto_summary_hour"),
             minute: AppDatabase.shared.setting(for: "auto_summary_minute")
@@ -460,9 +464,7 @@ struct SettingsView: View {
         breakLongFrequency = Int(AppDatabase.shared.setting(for: "break_long_frequency") ?? "4") ?? 4
         breakLongEnabled = (AppDatabase.shared.setting(for: "break_long_enabled") != "false")
         
-        let todayStr = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none)
-        let disabledDay = AppDatabase.shared.setting(for: "break_disabled_day") ?? ""
-        breakEnabledToday = (disabledDay != todayStr)
+
         let bgHex = AppDatabase.shared.setting(for: "break_background_hex") ?? "#000000"
         breakBackgroundColor = Color(hex: bgHex)
         breakBackgroundImagePath = AppDatabase.shared.setting(for: "break_background_image_path") ?? ""
@@ -512,6 +514,7 @@ struct SettingsView: View {
         AppDatabase.shared.saveSetting(key: "obsidian_export_sessions", value: obsidianExportSessions ? "true" : "false")
         AppDatabase.shared.saveSetting(key: "auto_summary_enabled",
                                        value: autoSummaryEnabled ? "true" : "false")
+        AppDatabase.shared.saveSetting(key: "break_pre_ai_enabled", value: breakPreAIEnabled ? "true" : "false")
         let comps = Calendar.current.dateComponents([.hour, .minute], from: autoSummaryTime)
         AppDatabase.shared.saveSetting(key: "auto_summary_hour",
                                        value: String(comps.hour ?? 23))
@@ -546,12 +549,7 @@ struct SettingsView: View {
            let json = String(data: data, encoding: .utf8) {
             AppDatabase.shared.saveSetting(key: "daily_reminder_times", value: json)
         }
-        if breakEnabledToday {
-            AppDatabase.shared.saveSetting(key: "break_disabled_day", value: "")
-        } else {
-            let todayStr = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none)
-            AppDatabase.shared.saveSetting(key: "break_disabled_day", value: todayStr)
-        }
+
         BreakScheduler.shared.refreshConfig()
 
         appState.afkThresholdSecs = afkMinutes * 60
@@ -688,7 +686,8 @@ struct SettingsView: View {
             try AppDatabase.shared.write { db in
                 try new.insert(db)
             }
-            refreshCategories()
+            SessionCategory.invalidateCache()
+            categories.append(new)
             NotificationCenter.default.post(name: .settingsDidSave, object: nil)
         } catch { print("Failed to add category: \(error)") }
     }
@@ -699,16 +698,18 @@ struct SettingsView: View {
             try AppDatabase.shared.write { db in
                 try mutableCat.update(db)
             }
-            refreshCategories()
+            SessionCategory.invalidateCache()
             NotificationCenter.default.post(name: .settingsDidSave, object: nil)
         } catch { print("Failed to save category: \(error)") }
     }
     
     private func updateCategoryColor(id: String, newHex: String) {
-        guard var cat = categories.first(where: { $0.id == id }) else { return }
-        // We need a way to set colorHex which is private. Actually I should make it internal or use a helper.
-        // For now, I'll just re-init or use a specialized update.
+        guard let cat = categories.first(where: { $0.id == id }) else { return }
         let updated = SessionCategory(id: cat.id, name: cat.name, colorHex: newHex, displayOrder: cat.displayOrder)
+
+        if let idx = categories.firstIndex(where: { $0.id == id }) {
+            categories[idx] = updated
+        }
         saveCategory(updated)
     }
     
@@ -717,24 +718,24 @@ struct SettingsView: View {
             try AppDatabase.shared.write { db in
                 try cat.delete(db)
             }
-            refreshCategories()
+            SessionCategory.invalidateCache()
+            categories.removeAll { $0.id == cat.id }
             NotificationCenter.default.post(name: .settingsDidSave, object: nil)
         } catch { print("Failed to delete category: \(error)") }
     }
     
     private func moveCategories(from: IndexSet, to: Int) {
-        var updated = categories
-        updated.move(fromOffsets: from, toOffset: to)
-        for i in 0..<updated.count {
-            updated[i].displayOrder = i
+        categories.move(fromOffsets: from, toOffset: to)
+        for i in 0..<categories.count {
+            categories[i].displayOrder = i
         }
         do {
             try AppDatabase.shared.write { db in
-                for cat in updated {
+                for cat in categories {
                     try cat.update(db)
                 }
             }
-            refreshCategories()
+            SessionCategory.invalidateCache()
             NotificationCenter.default.post(name: .settingsDidSave, object: nil)
         } catch { print("Failed to move categories: \(error)") }
     }

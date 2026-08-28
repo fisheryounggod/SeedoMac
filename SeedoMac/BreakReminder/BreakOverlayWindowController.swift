@@ -90,8 +90,8 @@ final class BreakOverlayWindowController: NSWindowController {
                     BreakScheduler.shared.endBreak(summary: summary, title: notes, categoryId: catId, outcome: "completed", startTs: self?.startTs ?? 0, endTs: self?.endTs ?? 0)
                     self?.close()
                 },
-                onDisableToday: { [weak self] in
-                    BreakScheduler.shared.disableToday()
+                onPauseTracking: { [weak self] in
+                    BreakScheduler.shared.pauseTracking()
                     self?.close()
                 }
             )

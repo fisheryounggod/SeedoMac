@@ -8,10 +8,15 @@ final class WorkSessionStore {
     convenience init() { self.init(db: AppDatabase.shared.pool) }
     init(db: some DatabaseWriter & DatabaseReader) { self.db = db }
 
-    func insert(_ session: inout WorkSession) throws {
+    func insert(_ session: inout WorkSession, syncToObsidian: Bool = true) throws {
         try db.write { d in try session.insert(d) }
         // Sync to calendar
         CalendarSyncService.shared.sync(session: session)
+
+        // Auto-export to Obsidian if enabled
+        if syncToObsidian && AppDatabase.shared.setting(for: "obsidian_export_sessions") == "true" {
+            try? ObsidianImporter.shared.appendSession(session)
+        }
     }
 
     func update(_ session: WorkSession) throws {
@@ -35,6 +40,19 @@ final class WorkSessionStore {
                 .filter(Column("start_ts") >= startMs && Column("start_ts") < endMs)
                 .order(Column("start_ts").asc)
                 .fetchAll(d)
+        }
+    }
+
+    func focusedDuration(from startMs: Int64, to endMs: Int64) throws -> Double {
+        try db.read { d in
+            try Double.fetchOne(d, sql: """
+                SELECT COALESCE(SUM(MAX(0, end_ts - start_ts)) / 1000.0, 0)
+                FROM work_sessions
+                WHERE start_ts >= ? AND start_ts < ?
+                  AND category_id IN (
+                      SELECT id FROM categories WHERE name LIKE '%专注%'
+                  )
+            """, arguments: [startMs, endMs]) ?? 0
         }
     }
 
@@ -120,6 +138,7 @@ final class WorkSessionStore {
                 try c.save(d)
             }
         }
+        SessionCategory.invalidateCache()
     }
 
     // MARK: - Unified Logs

@@ -1,4 +1,3 @@
-// Seedo/Views/Dashboard/AFKReturnView.swift
 import SwiftUI
 
 struct AFKReturnView: View {
@@ -8,8 +7,11 @@ struct AFKReturnView: View {
     let onDismiss: () -> Void
     
     @State private var summary: String = ""
-    @State private var label: String = ""
+    @State private var notes: String = ""
     @State private var selectedCategoryId: String = "focus"
+    @State private var topApps: [AppStat] = []
+    @State private var categories: [SessionCategory] = SessionCategory.all
+    @State private var isGenerating = false
     @FocusState private var isFocused: Bool
     
     private var durationMins: Int {
@@ -17,70 +19,106 @@ struct AFKReturnView: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("检测到一段离席/工作时间").font(.system(size: 14, weight: .bold))
-                    Text("\(durationMins) 分钟 (\(formatTime(startTs)) - \(formatTime(endTs)))")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button(action: onDismiss) {
-                    Image(systemName: "xmark").font(.system(size: 10, weight: .bold))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.tertiary)
+        VStack(spacing: 30) {
+            Image(systemName: "person.crop.circle.badge.clock")
+                .font(.system(size: 80))
+                .foregroundStyle(.blue)
+            
+            VStack(spacing: 8) {
+                Text("检测到一段离席/工作时间")
+                    .font(.system(size: 32, weight: .bold))
+                
+                Text("\(durationMins) 分钟 (\(formatTime(startTs)) - \(formatTime(endTs)))")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
             }
             
-            VStack(alignment: .leading, spacing: 4) {
-                Text("标题").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
-                TextField("这段时间在做什么？", text: $summary)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($isFocused)
-            }
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text("分类").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
-                HStack(spacing: 6) {
-                    ForEach(SessionCategory.all) { cat in
-                        Button {
-                            selectedCategoryId = cat.id
-                        } label: {
-                            HStack(spacing: 4) {
-                                Circle().fill(cat.color).frame(width: 6, height: 6)
-                                Text(cat.name).font(.system(size: 11, weight: .medium))
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(selectedCategoryId == cat.id ? cat.color.opacity(0.15) : Color.primary.opacity(0.04))
-                            .cornerRadius(6)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(selectedCategoryId == cat.id ? cat.color.opacity(0.3) : Color.clear, lineWidth: 1)
-                            )
+            if !topApps.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("离席前主要在使用：").font(.headline)
+                    ForEach(topApps.prefix(3)) { app in
+                        HStack {
+                            Text(app.appOrDomain)
+                            Spacer()
+                            Text("\(Int(app.totalSecs / 60)) 分钟").foregroundStyle(.secondary)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
+                .padding()
+                .background(Color.secondary.opacity(0.1))
+                .cornerRadius(12)
             }
             
-            Button(action: save) {
-                Text("记录并关闭")
-                    .font(.system(size: 12, weight: .bold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(summary.isEmpty ? Color.gray.opacity(0.3) : Color.blue)
-                    .foregroundStyle(.white)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("这段时间在做什么？").font(.headline)
+                    Spacer()
+                    Button(action: generateAISummary) {
+                        Label(isGenerating ? "生成中..." : "AI 一键生成", systemImage: "sparkles")
+                            .font(.subheadline)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.blue)
+                    .disabled(isGenerating)
+                }
+                
+                // Category Picker (Horizontal)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(categories) { cat in
+                            Button(action: { selectedCategoryId = cat.id }) {
+                                Text(cat.name)
+                                    .font(.system(size: 11, weight: .bold))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(selectedCategoryId == cat.id ? cat.color : Color.secondary.opacity(0.1))
+                                    .foregroundStyle(selectedCategoryId == cat.id ? .white : Color.primary)
+                                    .cornerRadius(6)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                
+                TextField("这次活动的主要总结...", text: $summary)
+                    .textFieldStyle(.plain)
+                    .padding(8)
+                    .background(Color.secondary.opacity(0.1))
                     .cornerRadius(8)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.3)))
+                    .focused($isFocused)
+                
+                Text("备注 (Notes)").font(.headline)
+                TextEditor(text: $notes)
+                    .font(.body)
+                    .frame(minHeight: 100)
+                    .padding(4)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.3)))
+                    .scrollContentBackground(.hidden)
+                    .background(Color.secondary.opacity(0.05))
             }
-            .buttonStyle(.plain)
-            .disabled(summary.trimmingCharacters(in: .whitespaces).isEmpty)
+            
+            HStack(spacing: 20) {
+                Button("忽略 (Esc)") { onDismiss() }
+                    .buttonStyle(.bordered)
+                    .scaleEffect(1.1)
+                
+                Button("记录并关闭") {
+                    save()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.blue)
+                .scaleEffect(1.2)
+                .disabled(summary.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .padding(.top, 10)
         }
-        .padding(16)
-        .frame(width: 320)
+        .frame(minWidth: 500, idealWidth: 720, maxWidth: .infinity, minHeight: 600, idealHeight: 720, maxHeight: .infinity)
+        .padding(40)
         .onAppear {
             isFocused = true
+            loadTopApps()
         }
     }
     
@@ -93,7 +131,7 @@ struct AFKReturnView: View {
             outcome: "completed",
             createdAt: Int64(Date().timeIntervalSince1970 * 1000),
             isManual: true,
-            title: "",
+            title: notes.trimmingCharacters(in: .whitespacesAndNewlines),
             categoryId: selectedCategoryId
         )
         onSave(session)
@@ -104,5 +142,31 @@ struct AFKReturnView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
         return formatter.string(from: date)
+    }
+    
+    private func loadTopApps() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let apps = (try? EventStore().topApps(startMs: startTs, endMs: endTs, limit: 5)) ?? []
+            DispatchQueue.main.async {
+                self.topApps = apps
+            }
+        }
+    }
+    
+    private func generateAISummary() {
+        isGenerating = true
+        AIService.shared.generateSessionSummary(startTs: startTs, endTs: endTs) { result in
+            DispatchQueue.main.async {
+                isGenerating = false
+                switch result {
+                case .success(let text):
+                    if !text.isEmpty {
+                        self.summary = text
+                    }
+                case .failure(let error):
+                    print("AI Generate error: \\(error)")
+                }
+            }
+        }
     }
 }

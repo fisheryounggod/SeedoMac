@@ -8,6 +8,7 @@ struct AddActivitySheet: View {
     @State private var startTime: Date = Date()
     @State private var durationMins: Int = 30
     @State private var selectedCategoryId: String = "focus"
+    @State private var isGenerating = false
     let onSave: (WorkSession) -> Void
     let onCancel: () -> Void
 
@@ -16,7 +17,17 @@ struct AddActivitySheet: View {
             Text("手动记录活动").font(.headline)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("标题").font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Text("标题").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button(action: generateAISummary) {
+                        Label(isGenerating ? "生成中..." : "AI 一键生成", systemImage: "sparkles")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.blue)
+                    .disabled(isGenerating)
+                }
                 TextField("这次活动的主要总结...", text: $summary)
                     .textFieldStyle(.roundedBorder)
             }
@@ -123,5 +134,31 @@ struct AddActivitySheet: View {
             categoryId: selectedCategoryId
         )
         onSave(session)
+    }
+
+    private func generateAISummary() {
+        let cal = Calendar.current
+        var dayComps = cal.dateComponents([.year, .month, .day], from: selectedDate)
+        let timeComps = cal.dateComponents([.hour, .minute], from: startTime)
+        dayComps.hour = timeComps.hour
+        dayComps.minute = timeComps.minute
+        let finalStart = cal.date(from: dayComps) ?? Date()
+        let startTs = Int64(finalStart.timeIntervalSince1970 * 1000)
+        let endTs = Int64(finalStart.addingTimeInterval(TimeInterval(durationMins * 60)).timeIntervalSince1970 * 1000)
+        
+        isGenerating = true
+        AIService.shared.generateSessionSummary(startTs: startTs, endTs: endTs) { result in
+            DispatchQueue.main.async {
+                isGenerating = false
+                switch result {
+                case .success(let text):
+                    if !text.isEmpty {
+                        self.summary = text
+                    }
+                case .failure(let error):
+                    print("AI Generate error: \(error)")
+                }
+            }
+        }
     }
 }

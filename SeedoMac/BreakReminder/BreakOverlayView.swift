@@ -16,6 +16,8 @@ struct BreakOverlayView: View {
     @State private var topApps: [AppStat] = []
     @State private var config: BreakConfig = BreakConfig.load()
     @State private var categories: [SessionCategory] = SessionCategory.all
+    @State private var isGenerating = false
+    @State private var hasFinished = false
     
     let startTs: Int64
     let endTs: Int64
@@ -35,7 +37,7 @@ struct BreakOverlayView: View {
     let onPostpone: () -> Void
     let onSkip: (String, String, String?) -> Void
     let onFinishBreak: (String, String, String?) -> Void
-    let onDisableToday: () -> Void
+    let onPauseTracking: () -> Void
     
     var body: some View {
         ZStack {
@@ -75,6 +77,10 @@ struct BreakOverlayView: View {
             if let catId = initialCategoryId { self.selectedCategoryId = catId }
             
             loadTopApps()
+
+            if AppDatabase.shared.setting(for: "break_pre_ai_enabled") == "true" {
+                generateAISummary()
+            }
         }
         .onDisappear {
             timer?.invalidate()
@@ -147,7 +153,17 @@ struct BreakOverlayView: View {
                     .cornerRadius(8)
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.3)))
                 
-                Text("备注 (Notes)").font(.headline)
+                HStack {
+                    Text("备注 (Notes)").font(.headline)
+                    Spacer()
+                    Button(action: generateAISummary) {
+                        Label(isGenerating ? "生成中..." : "AI 一键生成", systemImage: "sparkles")
+                            .font(.subheadline)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white.opacity(0.85))
+                    .disabled(isGenerating)
+                }
                 TextEditor(text: $notes)
                     .font(.body)
                     .frame(height: 100)
@@ -181,8 +197,8 @@ struct BreakOverlayView: View {
                 .scaleEffect(1.2)
             }
             
-            Button("今日禁用休息提醒") {
-                onDisableToday()
+            Button("暂停专注追踪") {
+                onPauseTracking()
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -216,14 +232,17 @@ struct BreakOverlayView: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                         NSSound(named: "Glass")?.play()
                     }
-                    // Automatically finish break and close overlay
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        guard !hasFinished else { return }
+                        hasFinished = true
                         onFinishBreak(summary, notes, selectedCategoryId)
                     }
                 }
             }
-            
+
             Button("我已休息好 (完成并记录)") {
+                guard !hasFinished else { return }
+                hasFinished = true
                 NSSound(named: "Glass")?.play()
                 onFinishBreak(summary, notes, selectedCategoryId)
             }
@@ -248,6 +267,23 @@ struct BreakOverlayView: View {
             let apps = (try? EventStore().topApps(startMs: startTs, endMs: endTs, limit: 5)) ?? []
             DispatchQueue.main.async {
                 self.topApps = apps
+            }
+        }
+    }
+
+    private func generateAISummary() {
+        isGenerating = true
+        AIService.shared.generateSessionSummary(startTs: startTs, endTs: endTs) { result in
+            DispatchQueue.main.async {
+                isGenerating = false
+                switch result {
+                case .success(let text):
+                    if !text.isEmpty {
+                        self.notes = text
+                    }
+                case .failure(let error):
+                    print("AI Generate error: \(error)")
+                }
             }
         }
     }

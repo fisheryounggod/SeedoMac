@@ -184,6 +184,84 @@ KEYWORDS: 关键字1, 关键字2, 关键字3
         return Array(tasks.prefix(3))
     }
 
+    /// Generates a short summary for a specific session based on app usage.
+    func generateSessionSummary(
+        startTs: Int64,
+        endTs: Int64,
+        completion: @escaping (Result<String, Error>) -> Void
+    ) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let store = EventStore()
+            let apps = (try? store.topApps(startMs: startTs, endMs: endTs, limit: 15)) ?? []
+            let urls = (try? store.topURLs(startMs: startTs, endMs: endTs, limit: 10)) ?? []
+
+            guard let apiKey = KeychainHelper.loadAPIKey(), !apiKey.isEmpty else {
+                DispatchQueue.main.async { completion(.failure(AIError.noAPIKey)) }
+                return
+            }
+
+            let systemPrompt = """
+            你是效能复盘助手。请根据用户在一段时间内使用的主要应用及其时长（以及浏览器访问的网址），用一句话生成一个简短精炼的活动总结（约10-30字），描述用户主要在做什么。
+            直接输出这段总结内容，不要任何前缀或解释。
+            """
+
+            var userContent = "活动期间应用使用统计：\n"
+            if apps.isEmpty {
+                userContent += "无明显应用使用记录（可能在阅读、开会或离开电脑）。"
+            } else {
+                for app in apps {
+                    let am = max(1, Int(app.totalSecs) / 60)
+                    userContent += "- \(app.appOrDomain): \(am)分钟\n"
+                }
+            }
+            if !urls.isEmpty {
+                userContent += "\n浏览器访问网址（按时长排序）：\n"
+                for item in urls {
+                    let am = max(1, Int(item.totalSecs) / 60)
+                    userContent += "- \(item.url): \(am)分钟\n"
+                }
+            }
+            
+            let body: [String: Any] = [
+                "model": self.model,
+                "stream": false,
+                "messages": [
+                    ["role": "system", "content": systemPrompt],
+                    ["role": "user",   "content": userContent],
+                ]
+            ]
+            
+            guard let url = URL(string: "\(self.baseURL)/chat/completions"),
+                  let bodyData = try? JSONSerialization.data(withJSONObject: body) else {
+                DispatchQueue.main.async { completion(.failure(AIError.invalidConfig)) }
+                return
+            }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = bodyData
+            request.timeoutInterval = 30
+
+            URLSession.shared.dataTask(with: request) { data, _, error in
+                DispatchQueue.main.async {
+                    if let error = error {
+                        completion(.failure(error)); return
+                    }
+                    guard let data = data,
+                          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          let choices = json["choices"] as? [[String: Any]],
+                          let message = choices.first?["message"] as? [String: Any],
+                          let content = message["content"] as? String else {
+                        completion(.failure(AIError.badResponse)); return
+                    }
+                    completion(.success(content.trimmingCharacters(in: .whitespacesAndNewlines)))
+                }
+            }.resume()
+        }
+    }
+
     /// Persists a summary (overwriting any existing row with the same date/periodKey)
     /// and posts `.dailySummaryDidSave` so the Log view can refresh.
     func persistSummary(_ summary: DailySummary) throws {
