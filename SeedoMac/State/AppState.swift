@@ -29,6 +29,24 @@ final class AppState: ObservableObject {
     @Published var isRedactTitles: Bool = false
     @Published var appearance: String = "system"   // system, light, dark
     @Published var todayGoal: String = ""
+    static func todayKey() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: Date())
+    }
+
+    func refreshTodayGoal() {
+        todayGoal = AppDatabase.shared.exactDailyPlan(for: Self.todayKey())
+    }
+
+    func saveTodayGoal(_ goal: String) {
+        todayGoal = goal.trimmingCharacters(in: .whitespacesAndNewlines)
+        AppDatabase.shared.saveSetting(key: "plan_daily:\(Self.todayKey())", value: todayGoal)
+        if isDailyRemindersEnabled {
+            NotificationService.shared.scheduleDailyReminders(times: dailyReminderTimes)
+        }
+    }
     @Published var aiCoachTasks: [String] = []
 
     // Auto Export
@@ -69,7 +87,7 @@ final class AppState: ObservableObject {
         df.locale = Locale(identifier: "en_US_POSIX")
         let todayStr = df.string(from: Date())
         
-        self.todayGoal = AppDatabase.shared.dailyPlan(for: todayStr)
+        self.todayGoal = AppDatabase.shared.exactDailyPlan(for: todayStr)
         
         if let coachJson = AppDatabase.shared.setting(for: "ai_coach_tasks:\(todayStr)"),
            let data = coachJson.data(using: .utf8),

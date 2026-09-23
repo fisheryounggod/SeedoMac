@@ -17,8 +17,11 @@ struct DeepFocusView: View {
     
     // UI Logic
     var body: some View {
+        GeometryReader { geometry in
+            let compact = geometry.size.height < 800
+            let dialSize = min(400, max(120, min(geometry.size.width - 64, geometry.size.height - 280)))
         ZStack {
-            Color.black.ignoresSafeArea()
+            SeedoStyle.night.ignoresSafeArea()
             
             if !isPrimary {
                 VStack {
@@ -29,7 +32,7 @@ struct DeepFocusView: View {
                     Spacer()
                 }
             } else {
-                VStack(spacing: 30) {
+                VStack(spacing: compact ? 16 : 30) {
                     // Top Header
                 HStack(alignment: .center, spacing: 10) {
                     if !showingLogOverlay {
@@ -72,7 +75,7 @@ struct DeepFocusView: View {
                 // Main Timer UI
                 ZStack {
                     Circle()
-                        .stroke(Color.white.opacity(0.05), lineWidth: 20)
+                        .stroke(Color.white.opacity(0.05), lineWidth: 6)
                     
                     let progress: Double = {
                         if scheduler.timerMode == .countdown {
@@ -84,8 +87,8 @@ struct DeepFocusView: View {
                     
                     Circle()
                         .trim(from: 0, to: progress)
-                        .stroke(scheduler.timerMode == .countdown ? Color.red.opacity(0.8) : Color.blue.opacity(0.8),
-                                style: StrokeStyle(lineWidth: 20, lineCap: .round))
+                        .stroke(SeedoStyle.mint,
+                                style: StrokeStyle(lineWidth: 6, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                         .animation(.linear, value: progress)
                     
@@ -94,13 +97,25 @@ struct DeepFocusView: View {
                             ? scheduler.remainingSecs
                             : scheduler.workElapsedSecs
                         Text(formatTime(displaySecs))
-                            .font(.system(size: 120, weight: .bold, design: .monospaced))
+                            .font(.system(size: dialSize * 0.3, weight: .light, design: .rounded))
                             .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.4)
+                            .padding(.horizontal, 24)
                         
                         Text(scheduler.timerMode == .countdown ? "剩余时间" : "专注用时")
                             .font(.caption)
                             .tracking(4)
                             .foregroundStyle(.secondary)
+
+                        if !scheduler.boundTaskTitle.isEmpty {
+                            Text(scheduler.boundTaskTitle)
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(SeedoStyle.mint)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 28)
+                        }
                         
                         HStack(spacing: 20) {
                             Button(action: { appState.isTracking.toggle() }) {
@@ -114,7 +129,7 @@ struct DeepFocusView: View {
                         .padding(.top, 10)
                     }
                 }
-                .frame(width: 400, height: 400)
+                .frame(width: dialSize, height: dialSize)
                 .scaleEffect(showingLogOverlay ? 0.6 : 1.0)
                 .animation(.spring(), value: showingLogOverlay)
                 
@@ -128,10 +143,10 @@ struct DeepFocusView: View {
                     .font(.system(size: 14, weight: .bold))
                     .padding(.horizontal, 24)
                     .padding(.vertical, 12)
-                    .background(Color.red.opacity(0.2))
-                    .foregroundStyle(.red)
+                    .background(SeedoStyle.mint.opacity(0.12))
+                    .foregroundStyle(SeedoStyle.mint)
                     .cornerRadius(12)
-                    .padding(.bottom, 60)
+                    .padding(.bottom, compact ? 24 : 60)
                 }
             }
             .padding()
@@ -144,9 +159,10 @@ struct DeepFocusView: View {
                     .ignoresSafeArea()
                     .transition(.opacity)
                 
-                VStack(spacing: 25) {
+                ScrollView {
+                VStack(spacing: 24) {
                     VStack(spacing: 12) {
-                        Text("🎉 专注于此！").font(.system(size: 32, weight: .bold))
+                        Text("每一份投入，都算数。").font(.system(size: 28, weight: .semibold, design: .rounded))
                         Text("这段专注已经结束，请记录一下你的活动")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
@@ -179,27 +195,7 @@ struct DeepFocusView: View {
                     
                     VStack(alignment: .leading, spacing: 12) {
                         Text("类别").font(.system(size: 13, weight: .bold)).foregroundStyle(.secondary)
-                        HStack(spacing: 12) {
-                            ForEach(SessionCategory.all) { cat in
-                                Button {
-                                    selectedCategoryId = cat.id
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Circle().fill(cat.color).frame(width: 8, height: 8)
-                                        Text(cat.name).font(.system(size: 14, weight: .medium))
-                                    }
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 10)
-                                    .background(selectedCategoryId == cat.id ? cat.color.opacity(0.2) : Color.white.opacity(0.06))
-                                    .cornerRadius(12)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(selectedCategoryId == cat.id ? cat.color.opacity(0.5) : Color.clear, lineWidth: 1)
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
+                        SeedoCategoryPicker(categories: SessionCategory.all, selection: $selectedCategoryId)
                     }
                     .padding(.bottom, 10)
                     
@@ -224,17 +220,27 @@ struct DeepFocusView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
-                        .tint(.blue)
+                        .tint(SeedoStyle.accent)
                         .disabled(sessionTitle.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
                     }
                 }
-                .padding(40)
-                .background(RoundedRectangle(cornerRadius: 24).fill(Color(white: 0.12)))
-                .frame(width: 500)
-                .transition(.scale.combined(with: .opacity))
+                .seedoCard(padding: 28)
+                .frame(maxWidth: 520)
+                .padding(24)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: geometry.size.height)
+                }
+                .transition(.opacity)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .preferredColorScheme(.dark)
+        .tint(SeedoStyle.accent)
         .onAppear {
+            // A task started from 今日任务 is already the session content;
+            // keep it available if a save needs to be retried.
+            sessionTitle = scheduler.boundTaskTitle
             playDingDing()
         }
         .onChange(of: showingLogOverlay) { newValue in
@@ -256,8 +262,23 @@ struct DeepFocusView: View {
     
     private func handleManualStop() {
         appState.isTracking = false
+        if scheduler.stopAndRecordBoundTask(completion: handleBoundTaskSaveResult) {
+            isSaving = true
+            return
+        }
         withAnimation {
             showingLogOverlay = true
+        }
+    }
+
+    private func handleBoundTaskSaveResult(_ result: Result<Void, Error>) {
+        switch result {
+        case .success:
+            onClose()
+        case .failure(let error):
+            print("[DeepFocus] Bound task save failed: \(error)")
+            isSaving = false
+            withAnimation { showingLogOverlay = true }
         }
     }
     

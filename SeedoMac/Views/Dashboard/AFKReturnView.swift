@@ -1,6 +1,12 @@
 import SwiftUI
+import AppKit
 
 struct AFKReturnView: View {
+    private enum FocusedField: Hashable {
+        case summary
+        case notes
+    }
+
     let startTs: Int64
     let endTs: Int64
     let onSave: (WorkSession) -> Void
@@ -12,27 +18,19 @@ struct AFKReturnView: View {
     @State private var topApps: [AppStat] = []
     @State private var categories: [SessionCategory] = SessionCategory.all
     @State private var isGenerating = false
-    @FocusState private var isFocused: Bool
+    @FocusState private var focusedField: FocusedField?
     
     private var durationMins: Int {
         Int((endTs - startTs) / 60000)
     }
     
     var body: some View {
-        VStack(spacing: 30) {
-            Image(systemName: "person.crop.circle.badge.clock")
-                .font(.system(size: 80))
-                .foregroundStyle(.blue)
-            
-            VStack(spacing: 8) {
-                Text("检测到一段离席/工作时间")
-                    .font(.system(size: 32, weight: .bold))
-                
-                Text("\(durationMins) 分钟 (\(formatTime(startTs)) - \(formatTime(endTs)))")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-            }
-            
+        ScrollView {
+        VStack(alignment: .leading, spacing: 24) {
+            SeedoPageHeading(title: "欢迎回来", subtitle: "这段时间，做了些什么？", symbol: "person.crop.circle.badge.clock")
+            Text("\(durationMins) 分钟 · \(formatTime(startTs)) — \(formatTime(endTs))")
+                .font(.system(size: 18, weight: .medium, design: .rounded))
+                .foregroundStyle(SeedoStyle.accent)
             if !topApps.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("离席前主要在使用：").font(.headline)
@@ -58,36 +56,19 @@ struct AFKReturnView: View {
                             .font(.subheadline)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(SeedoStyle.accent)
                     .disabled(isGenerating)
                 }
                 
-                // Category Picker (Horizontal)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(categories) { cat in
-                            Button(action: { selectedCategoryId = cat.id }) {
-                                Text(cat.name)
-                                    .font(.system(size: 11, weight: .bold))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 5)
-                                    .background(selectedCategoryId == cat.id ? cat.color : Color.secondary.opacity(0.1))
-                                    .foregroundStyle(selectedCategoryId == cat.id ? .white : Color.primary)
-                                    .cornerRadius(6)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-                
+                SeedoCategoryPicker(categories: categories, selection: $selectedCategoryId)
+
                 TextField("这次活动的主要总结...", text: $summary)
                     .textFieldStyle(.plain)
                     .padding(8)
                     .background(Color.secondary.opacity(0.1))
                     .cornerRadius(8)
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.3)))
-                    .focused($isFocused)
+                    .focused($focusedField, equals: .summary)
                 
                 Text("备注 (Notes)").font(.headline)
                 TextEditor(text: $notes)
@@ -97,28 +78,52 @@ struct AFKReturnView: View {
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.3)))
                     .scrollContentBackground(.hidden)
                     .background(Color.secondary.opacity(0.05))
+                    .focused($focusedField, equals: .notes)
+                    .simultaneousGesture(TapGesture().onEnded {
+                        focusedField = .notes
+                    })
             }
             
             HStack(spacing: 20) {
                 Button("忽略 (Esc)") { onDismiss() }
-                    .buttonStyle(.bordered)
-                    .scaleEffect(1.1)
+                    .buttonStyle(SeedoButtonStyle())
+                    .keyboardShortcut(.cancelAction)
                 
                 Button("记录并关闭") {
                     save()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(SeedoButtonStyle(prominent: true))
                 .tint(.blue)
-                .scaleEffect(1.2)
+                .keyboardShortcut(.return, modifiers: .command)
                 .disabled(summary.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             .padding(.top, 10)
         }
-        .frame(minWidth: 500, idealWidth: 720, maxWidth: .infinity, minHeight: 600, idealHeight: 720, maxHeight: .infinity)
-        .padding(40)
+        .padding(28)
+        .frame(maxWidth: 720)
+        .frame(maxWidth: .infinity)
+        }
+        .frame(minWidth: 480, minHeight: 400)
+        .background(SeedoStyle.canvas)
+        .tint(SeedoStyle.accent)
         .onAppear {
-            isFocused = true
+            requestInitialFocus()
             loadTopApps()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            // Menu-bar apps can render SwiftUI before their window becomes key.
+            // Re-requesting a field only when none is active preserves a user's
+            // click into Notes and lets the Chinese IME keep first responder.
+            if focusedField == nil {
+                requestInitialFocus()
+            }
+        }
+    }
+
+    private func requestInitialFocus() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            guard focusedField == nil else { return }
+            focusedField = .summary
         }
     }
     

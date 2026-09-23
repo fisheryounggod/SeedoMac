@@ -1,5 +1,6 @@
 // Seedo/Views/Dashboard/AddActivitySheet.swift
 import SwiftUI
+import AppKit
 
 struct AddActivitySheet: View {
     @State private var summary: String = ""
@@ -9,12 +10,36 @@ struct AddActivitySheet: View {
     @State private var durationMins: Int = 30
     @State private var selectedCategoryId: String = "focus"
     @State private var isGenerating = false
-    let onSave: (WorkSession) -> Void
+    @State private var saveError: String?
+    @State private var isSaving = false
+    @FocusState private var titleFocused: Bool
+    let onSave: (WorkSession, @escaping (Result<Void, Error>) -> Void) -> Void
     let onCancel: () -> Void
 
-    var body: some View {
+    init(initialDuration: Double? = nil, now: Date = Date(), onSave: @escaping (WorkSession, @escaping (Result<Void, Error>) -> Void) -> Void, onCancel: @escaping () -> Void) {
+        let prefill = Self.prefill(duration: initialDuration, now: now)
+        _selectedDate = State(initialValue: prefill.start)
+        _startTime = State(initialValue: prefill.start)
+        _durationMins = State(initialValue: prefill.minutes)
+        self.onSave = onSave
+        self.onCancel = onCancel
+    }
+
+    static func prefill(duration: Double?, now: Date) -> (start: Date, minutes: Int) {
+        guard let duration, duration.isFinite, duration > 0 else { return (now, 30) }
+        let seconds = min(duration, 86_400)
+        return (now.addingTimeInterval(-seconds), max(1, Int((seconds / 60).rounded())))
+    }
+
+    private var isValid: Bool {
+        (1...1440).contains(durationMins) &&
+        (!summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+         !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
+    private var formContent: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("手动记录活动").font(.headline)
+            SeedoPageHeading(title: "记录一段投入", subtitle: "让每一次专注都有迹可循。", symbol: "square.and.pencil")
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
@@ -25,11 +50,12 @@ struct AddActivitySheet: View {
                             .font(.caption)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(SeedoStyle.accent)
                     .disabled(isGenerating)
                 }
                 TextField("这次活动的主要总结...", text: $summary)
                     .textFieldStyle(.roundedBorder)
+                    .focused($titleFocused)
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -37,11 +63,8 @@ struct AddActivitySheet: View {
                 TextEditor(text: $label)
                     .font(.body)
                     .frame(height: 100)
-                    .padding(4)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color.secondary.opacity(0.3))
-                    )
+                    .scrollContentBackground(.hidden)
+                    .seedoInput()
             }
 
             HStack {
@@ -71,50 +94,57 @@ struct AddActivitySheet: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("类别").font(.system(size: 13, weight: .bold)).foregroundStyle(.secondary)
-                HStack(spacing: 8) {
-                    ForEach(SessionCategory.all) { cat in
-                        Button {
-                            selectedCategoryId = cat.id
-                        } label: {
-                            HStack(spacing: 6) {
-                                Circle().fill(cat.color).frame(width: 8, height: 8)
-                                Text(cat.name).font(.system(size: 13, weight: .medium))
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(selectedCategoryId == cat.id ? cat.color.opacity(0.15) : Color.primary.opacity(0.05))
-                            .cornerRadius(10)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(selectedCategoryId == cat.id ? cat.color.opacity(0.3) : Color.clear, lineWidth: 1)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
+                SeedoCategoryPicker(categories: SessionCategory.all, selection: $selectedCategoryId)
             }
+            TodayGoalEditor()
+        }
+        .padding(24)
+    }
 
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView { formContent.disabled(isSaving) }
+            if let saveError {
+                Text(saveError).font(.caption).foregroundStyle(.red).padding(.horizontal, 20)
+            }
             HStack {
                 Spacer()
                 Button("取消") { onCancel() }
-                Button("保存") { save() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(summary.trimmingCharacters(in: .whitespaces).isEmpty && label.trimmingCharacters(in: .whitespaces).isEmpty)
-                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(SeedoButtonStyle())
+                    .keyboardShortcut(.cancelAction)
+                    .disabled(isSaving)
+                Button(isSaving ? "保存中…" : "保存") { save() }
+                    .buttonStyle(SeedoButtonStyle(prominent: true))
+                    .disabled(!isValid || isGenerating || isSaving)
+                    .keyboardShortcut(.return, modifiers: .command)
             }
+            .padding(20)
         }
-        .padding(20)
         .frame(minWidth: 460)
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("PrefillAddActivity"))) { note in
-            if let durationSecs = note.object as? Double {
-                let mins = Int(round(durationSecs / 60.0))
-                self.durationMins = max(1, mins)
-                self.startTime = Date().addingTimeInterval(-durationSecs)
-            }
+        .background(SeedoStyle.canvas)
+        .tint(SeedoStyle.accent)
+        .onAppear { focusTitleField() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            guard let window = note.object as? NSWindow,
+                  window.title == "手动记录活动" else { return }
+            focusTitleField()
+        }
+    }
+
+    private func focusTitleField() {
+        // A menu-bar app may render the hosting view before its window becomes
+        // key. Deferring the focus request until the next main-run-loop turn
+        // makes the NSTextField a real first responder, including IME input
+        // and text selection.
+        DispatchQueue.main.async {
+            titleFocused = true
         }
     }
 
     private func save() {
+        guard isValid, !isSaving else { return }
+        isSaving = true
+        saveError = nil
         let cal = Calendar.current
         var dayComps = cal.dateComponents([.year, .month, .day], from: selectedDate)
         let timeComps = cal.dateComponents([.hour, .minute], from: startTime)
@@ -133,10 +163,16 @@ struct AddActivitySheet: View {
             title: label.trimmingCharacters(in: .whitespaces),
             categoryId: selectedCategoryId
         )
-        onSave(session)
+        onSave(session) { result in
+            isSaving = false
+            if case .failure(let error) = result {
+                saveError = "保存失败，请重试：\(error.localizedDescription)"
+            }
+        }
     }
 
     private func generateAISummary() {
+        guard (1...1440).contains(durationMins) else { return }
         let cal = Calendar.current
         var dayComps = cal.dateComponents([.year, .month, .day], from: selectedDate)
         let timeComps = cal.dateComponents([.hour, .minute], from: startTime)

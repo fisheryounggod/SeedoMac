@@ -36,6 +36,11 @@ final class BreakScheduler: ObservableObject {
     @Published var isBreakInProgress = false
     private var postponedOnce = false
     @Published var isFocusActive: Bool = true // Enabled by default as "Normal Mode"
+
+    /// Task selected from 今日任务 for the current focus session.
+    /// This is separate from AppState.currentTitle, which the activity
+    /// tracker continuously replaces with the foreground window title.
+    @Published private(set) var boundTaskTitle: String = ""
     
     /// Tracks how many focus sessions have been completed since the last long break.
     @Published var sessionsSinceLongBreak: Int = UserDefaults.standard.integer(forKey: "break_session_count")
@@ -84,6 +89,28 @@ final class BreakScheduler: ObservableObject {
 
     func toggleTimerMode() {
         timerMode = timerMode == .countdown ? .stopwatch : .countdown
+    }
+
+    func startTask(_ title: String, mode: TimerMode) {
+        let normalized = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+
+        // The two controls in 今日任务 are two views of the same running
+        // session. Switching between countdown and stopwatch must keep the
+        // task, elapsed time, start timestamp, and accumulated skipped rounds.
+        if boundTaskTitle == normalized {
+            timerMode = mode
+            isFocusActive = true
+            savePersistence()
+            return
+        }
+
+        // Selecting a different task intentionally starts a fresh session.
+        resetWork()
+        timerMode = mode
+        boundTaskTitle = normalized
+        isFocusActive = true
+        savePersistence()
     }
  
     private func setupObservers() {
@@ -187,6 +214,37 @@ final class BreakScheduler: ObservableObject {
         
         let willBeLong = isLongBreak
         let durationMins = willBeLong ? config.longBreakDurationMins : config.breakDurationMins
+        let taskTitle = boundTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sessionAlreadyRecorded: Bool
+
+        if taskTitle.isEmpty {
+            sessionAlreadyRecorded = false
+        } else {
+            var session = WorkSession(
+                startTs: startTs,
+                endTs: endTs,
+                topAppsJson: fetchTopAppsJson(start: startTs, end: endTs),
+                summary: taskTitle,
+                outcome: "completed",
+                createdAt: endTs,
+                isManual: true,
+                title: taskTitle,
+                categoryId: "focus"
+            )
+            do {
+                try WorkSessionStore().insert(&session)
+                completeSessionCount(wasLongBreak: willBeLong)
+                resetWork()
+                isBreakInProgress = true
+                sessionAlreadyRecorded = true
+                NotificationCenter.default.post(name: .workSessionDidSave, object: nil)
+            } catch {
+                // Keep the session intact and fall back to the editable review
+                // instead of losing a record when persistence fails.
+                print("[BreakScheduler] Bound task auto-save failed: \(error)")
+                sessionAlreadyRecorded = false
+            }
+        }
         
         // Broadcast for the OverlayWindowController to pick up
         NotificationCenter.default.post(
@@ -201,8 +259,9 @@ final class BreakScheduler: ObservableObject {
                 "durationMins": durationMins,
                 "sessionIndex": sessionsSinceLongBreak + 1,
                 "totalSessions": config.longBreakFrequency,
+                "sessionAlreadyRecorded": sessionAlreadyRecorded,
                 "previousSummary": lastSkippedSummary,
-                "previousNotes": lastSkippedNotes,
+                "previousNotes": sessionAlreadyRecorded ? "" : (taskTitle.isEmpty ? lastSkippedNotes : taskTitle),
                 "previousCategoryId": lastSkippedCategoryId
             ]
         )
@@ -230,19 +289,22 @@ final class BreakScheduler: ObservableObject {
         NotificationCenter.default.post(name: .workSessionDidSave, object: nil)
 
         // Update session tracking
-        if outcome == "completed" {
-            if isLongBreak {
-                sessionsSinceLongBreak = 0
-            } else {
-                sessionsSinceLongBreak += 1
-            }
-            UserDefaults.standard.set(sessionsSinceLongBreak, forKey: "break_session_count")
-        }
+        if outcome == "completed" { completeSessionCount(wasLongBreak: isLongBreak) }
         
         // Reset
         resetWork()
         postponedOnce = false
         isBreakInProgress = false
+    }
+
+    func finishAlreadyRecordedBreak() {
+        resetWork()
+        isBreakInProgress = false
+    }
+
+    private func completeSessionCount(wasLongBreak: Bool) {
+        sessionsSinceLongBreak = wasLongBreak ? 0 : sessionsSinceLongBreak + 1
+        UserDefaults.standard.set(sessionsSinceLongBreak, forKey: "break_session_count")
     }
     
     func postponeBreak() {
@@ -309,6 +371,19 @@ final class BreakScheduler: ObservableObject {
             }
         }
     }
+
+    /// Records a task-bound session without opening an input form.
+    /// Returns false when the current session has no bound task so callers can
+    /// retain the existing manual-record flow.
+    @discardableResult
+    func stopAndRecordBoundTask(completion: @escaping (Result<Void, Error>) -> Void) -> Bool {
+        let title = boundTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return false }
+        // Keep the task in both fields: summary is the primary activity text
+        // in statistics, while title remains available as the session note.
+        stopAndRecordCurrentSession(title: title, summary: title, categoryId: "focus", completion: completion)
+        return true
+    }
     
     func resetWork() {
         workElapsedSecsDetailed = 0
@@ -317,6 +392,7 @@ final class BreakScheduler: ObservableObject {
         lastSkippedNotes = ""
         lastSkippedCategoryId = nil
         sessionStartTs = nil
+        boundTaskTitle = ""
         postponedOnce = false
         isBreakInProgress = false
         clearPersistence()
@@ -330,6 +406,7 @@ final class BreakScheduler: ObservableObject {
     private let kPostponedKey = "focus_timer_postponed"
     private let kLastSavedKey = "focus_timer_last_saved"
     private let kTimerModeKey = "focus_timer_mode"
+    private let kBoundTaskTitleKey = "focus_timer_bound_task_title"
 
     private func savePersistence() {
         let defaults = UserDefaults.standard
@@ -341,6 +418,11 @@ final class BreakScheduler: ObservableObject {
             defaults.removeObject(forKey: kSessionStartKey)
         }
         defaults.set(postponedOnce, forKey: kPostponedKey)
+        if boundTaskTitle.isEmpty {
+            defaults.removeObject(forKey: kBoundTaskTitleKey)
+        } else {
+            defaults.set(boundTaskTitle, forKey: kBoundTaskTitleKey)
+        }
         defaults.set(Int64(Date().timeIntervalSince1970), forKey: kLastSavedKey)
     }
     
@@ -361,6 +443,7 @@ final class BreakScheduler: ObservableObject {
             let savedStartTs = defaults.object(forKey: kSessionStartKey) as? NSNumber
             self.sessionStartTs = savedStartTs?.int64Value
                 ?? Int64((Date().timeIntervalSince1970 - totalElapsedSecs) * 1000)
+            self.boundTaskTitle = defaults.string(forKey: kBoundTaskTitleKey) ?? ""
             self.postponedOnce = defaults.bool(forKey: kPostponedKey)
             print("[BreakScheduler] Recovered session: \(workElapsedSecsDetailed)s elapsed")
         }
@@ -372,6 +455,7 @@ final class BreakScheduler: ObservableObject {
         defaults.removeObject(forKey: kAccumulatedKey)
         defaults.removeObject(forKey: kSessionStartKey)
         defaults.removeObject(forKey: kPostponedKey)
+        defaults.removeObject(forKey: kBoundTaskTitleKey)
         defaults.removeObject(forKey: kLastSavedKey)
     }
     

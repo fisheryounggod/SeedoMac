@@ -11,11 +11,12 @@ class KeyWindow: NSWindow {
     override var canBecomeMain: Bool { true }
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var dashboardWindowController: DashboardWindowController?
     private var settingsWindowController: SettingsWindowController?
+    private var manualRecordWindowController: ManualRecordWindowController?
     private var afkReturnWindowController: NSWindowController?
     private var deepFocusWindows: [NSWindowController] = []
     private var aiReviewWindowController: NSWindowController?
@@ -44,6 +45,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         scheduleAutoDailySummary()
         checkAccessibilityPermission()
         setupShortcuts()
+        let manualRecordObserver = NotificationCenter.default.addObserver(forName: .shouldShowAddActivity, object: nil, queue: .main) { [weak self] note in
+            self?.showManualRecord(duration: note.object as? Double)
+        }
+        notificationObservers.append(manualRecordObserver)
         
         NotificationService.shared.requestAuthorization { [weak self] granted in
             if granted {
@@ -92,6 +97,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let durMins = (userInfo["durationMins"] as? NSNumber)?.intValue ?? 5
             let idx = (userInfo["sessionIndex"] as? NSNumber)?.intValue ?? 1
             let total = (userInfo["totalSessions"] as? NSNumber)?.intValue ?? 4
+            let sessionAlreadyRecorded = (userInfo["sessionAlreadyRecorded"] as? NSNumber)?.boolValue ?? false
             let initialSummary = userInfo["previousSummary"] as? String ?? ""
             let initialNotes = userInfo["previousNotes"] as? String ?? ""
             let initialCategoryId = userInfo["previousCategoryId"] as? String
@@ -105,6 +111,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 durationMins: durMins,
                 sessionIndex: idx,
                 totalSessions: total,
+                sessionAlreadyRecorded: sessionAlreadyRecorded,
                 initialSummary: initialSummary,
                 initialNotes: initialNotes,
                 initialCategoryId: initialCategoryId
@@ -168,6 +175,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         durationMins: Int,
         sessionIndex: Int,
         totalSessions: Int,
+        sessionAlreadyRecorded: Bool = false,
         initialSummary: String = "",
         initialNotes: String = "",
         initialCategoryId: String? = nil
@@ -184,6 +192,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             durationMins: durationMins,
             sessionIndex: sessionIndex,
             totalSessions: totalSessions,
+            sessionAlreadyRecorded: sessionAlreadyRecorded,
             initialSummary: initialSummary,
             initialNotes: initialNotes,
             initialCategoryId: initialCategoryId
@@ -220,16 +229,40 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setupShortcuts() {
-        KeyboardShortcuts.onKeyDown(for: .togglePureFocus) { [weak self] in
-            self?.enterDeepFocus()
+        KeyboardShortcuts.onKeyUp(for: .togglePureFocus) { [weak self] in
+            self?.togglePureFocus()
         }
         
-        KeyboardShortcuts.onKeyDown(for: .startPauseFocus) { [weak self] in
+        KeyboardShortcuts.onKeyUp(for: .startPauseFocus) { [weak self] in
             self?.toggleTracking()
         }
 
-        KeyboardShortcuts.onKeyDown(for: .openSettings) { [weak self] in
+        KeyboardShortcuts.onKeyUp(for: .openSettings) { [weak self] in
             self?.showSettingsWindow()
+        }
+        KeyboardShortcuts.onKeyUp(for: .addManualRecord) { [weak self] in
+            self?.addManualRecord()
+        }
+        KeyboardShortcuts.onKeyUp(for: .openStats) { [weak self] in
+            self?.openStats()
+        }
+        KeyboardShortcuts.onKeyUp(for: .stopAndRecord) { [weak self] in
+            self?.stopAndRecord()
+        }
+
+        // Keep the recorded shortcuts, but let the user opt out of the
+        // cross-application Carbon monitor. App-local menu shortcuts in
+        // SeedoApp remain available when this is disabled.
+        applyGlobalShortcutsSetting()
+    }
+
+    private func applyGlobalShortcutsSetting() {
+        let enabled = AppDatabase.shared.setting(for: "global_shortcuts_enabled") != "false"
+        KeyboardShortcuts.isEnabled = enabled
+        if enabled {
+            KeyboardShortcuts.enable(KeyboardShortcuts.Name.allSeedoShortcuts)
+        } else {
+            KeyboardShortcuts.disable(KeyboardShortcuts.Name.allSeedoShortcuts)
         }
     }
     
@@ -250,7 +283,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.sendAction(on: [.leftMouseDown, .rightMouseDown])
 
         popover = NSPopover()
-        popover.contentSize = NSSize(width: 300, height: 320)
+        popover.contentSize = NSSize(width: 380, height: 600)
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(
             rootView: TodayView(appState: appState, openDashboard: { [weak self] tab in
@@ -270,6 +303,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             guard let self else { return }
             self.tracker.syncSettings(from: self.appState)
+            self.applyGlobalShortcutsSetting()
             self.runObsidianImportIfEnabled()
             self.rescheduleDailyReminders()
         }
@@ -527,7 +561,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Actions
 
-    @objc private func handleStatusItemClick(_ sender: Any?) {
+    @MainActor @objc private func handleStatusItemClick(_ sender: Any?) {
         let event = NSApp.currentEvent
         if event?.type == .rightMouseDown {
             showContextMenu()
@@ -549,27 +583,46 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func showContextMenu() {
+    @MainActor private func showContextMenu() {
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "设置", action: #selector(showSettingsWindow), keyEquivalent: ","))
-        menu.addItem(NSMenuItem(title: "详细统计", action: #selector(openStats), keyEquivalent: "s"))
-        menu.addItem(NSMenuItem(title: "手动添加记录", action: #selector(addManualRecord), keyEquivalent: "n"))
-        menu.addItem(NSMenuItem(title: "纯专注模式", action: #selector(enterDeepFocus), keyEquivalent: "d"))
-        let trackingTitle = appState.isTracking ? "暂停追踪" : "开始追踪"
-        menu.addItem(NSMenuItem(title: trackingTitle, action: #selector(toggleTracking), keyEquivalent: "p"))
+        menu.delegate = self
+
+        let settingsItem = NSMenuItem(title: "设置", action: #selector(showSettingsWindow), keyEquivalent: "")
+        settingsItem.setShortcut(for: .openSettings)
+        menu.addItem(settingsItem)
+
+        let statsItem = NSMenuItem(title: "统计", action: #selector(openStats), keyEquivalent: "")
+        statsItem.setShortcut(for: .openStats)
+        menu.addItem(statsItem)
+
+        let manualRecordItem = NSMenuItem(title: "记录", action: #selector(addManualRecord), keyEquivalent: "")
+        manualRecordItem.setShortcut(for: .addManualRecord)
+        menu.addItem(manualRecordItem)
+
+        let pureFocusItem = NSMenuItem(title: "全屏", action: #selector(togglePureFocus), keyEquivalent: "")
+        pureFocusItem.setShortcut(for: .togglePureFocus)
+        menu.addItem(pureFocusItem)
+
+        let trackingTitle = appState.isTracking ? "暂停" : "开始"
+        let trackingItem = NSMenuItem(title: trackingTitle, action: #selector(toggleTracking), keyEquivalent: "")
+        trackingItem.setShortcut(for: .startPauseFocus)
+        menu.addItem(trackingItem)
         
         if appState.isTracking {
-            menu.addItem(NSMenuItem(title: "结束并记录", action: #selector(stopAndRecord), keyEquivalent: "r"))
+            let stopItem = NSMenuItem(title: "停止", action: #selector(stopAndRecord), keyEquivalent: "")
+            stopItem.setShortcut(for: .stopAndRecord)
+            menu.addItem(stopItem)
         }
         
         menu.addItem(NSMenuItem.separator())
         
-        let quitItem = NSMenuItem(title: "退出", action: #selector(quitApp), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "退出", action: #selector(quitApp), keyEquivalent: "")
         menu.addItem(quitItem)
         
         // Final strict icon removal pass
         for item in menu.items {
             item.image = nil
+            item.target = self
         }
         
         statusItem.menu = menu
@@ -577,12 +630,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = nil // Reset so next left-click doesn't show menu
     }
 
+    @MainActor func menuWillOpen(_ menu: NSMenu) {
+        // The menu item owns the shortcut while the menu is tracking. This
+        // prevents the global Carbon handler from firing a second time.
+        KeyboardShortcuts.disable(KeyboardShortcuts.Name.allSeedoShortcuts)
+    }
+
+    @MainActor func menuDidClose(_ menu: NSMenu) {
+        applyGlobalShortcutsSetting()
+    }
+
     @objc func openStats() {
         openDashboard(tab: .stats)
     }
 
     @objc func showSettingsWindow() {
-        print("[AppDelegate] Attempting to show settings window...")
+        popover.performClose(nil)
+        dashboardWindowController?.window?.orderOut(nil)
+        manualRecordWindowController?.window?.orderOut(nil)
         if settingsWindowController == nil {
             settingsWindowController = SettingsWindowController(appState: appState)
         }
@@ -597,9 +662,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    @objc private func addManualRecord() {
-        openDashboard(tab: .stats)
-        NotificationCenter.default.post(name: .shouldShowAddActivity, object: nil)
+    @objc func addManualRecord() {
+        showManualRecord(duration: nil)
+    }
+
+    private func showManualRecord(duration: Double?) {
+        popover.performClose(nil)
+        dashboardWindowController?.window?.orderOut(nil)
+        settingsWindowController?.window?.orderOut(nil)
+        if manualRecordWindowController == nil {
+            manualRecordWindowController = ManualRecordWindowController(appState: appState, duration: duration, onSave: { session, completion in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let result = Result<Void, Error> {
+                        var savedSession = session
+                        try WorkSessionStore().insert(&savedSession)
+                    }
+                    DispatchQueue.main.async {
+                        if case .success = result {
+                            NotificationCenter.default.post(name: .workSessionDidSave, object: nil)
+                        }
+                        completion(result)
+                    }
+                }
+            }, onClose: { [weak self] in
+                self?.manualRecordWindowController = nil
+            })
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        manualRecordWindowController?.showWindow(nil)
+        manualRecordWindowController?.window?.makeKeyAndOrderFront(nil)
     }
 
     @objc private func todayAISummary() {
@@ -610,18 +701,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApplication.shared.terminate(nil)
     }
 
-    @objc private func toggleTracking() {
+    @objc func toggleTracking() {
+        if breakOverlayController?.window?.isVisible == true {
+            BreakScheduler.shared.pauseTracking()
+            breakOverlayController?.close()
+            breakOverlayController = nil
+            return
+        }
         appState.isTracking.toggle()
     }
 
     @objc private func stopAndRecord() {
-        let duration = appState.currentDurationSecs
         appState.isTracking = false
-        resetTracking()
-        openDashboard(tab: .stats)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            NotificationCenter.default.post(name: .shouldShowAddActivity, object: duration)
+        let scheduler = BreakScheduler.shared
+        if !scheduler.boundTaskTitle.isEmpty {
+            // Flush the last foreground-app event before the work session
+            // snapshots its top apps.
+            tracker.reset()
         }
+        if scheduler.stopAndRecordBoundTask(completion: { [weak self] result in
+            if case .success = result {
+                self?.refreshTodayStats()
+            } else if case .failure(let error) = result {
+                print("[AppDelegate] Bound task save failed: \(error)")
+            }
+        }) {
+            closeDeepFocusWindows()
+            return
+        }
+        guard manualRecordWindowController == nil else {
+            showManualRecord(duration: nil)
+            return
+        }
+        let duration = appState.currentDurationSecs
+        resetTracking()
+        showManualRecord(duration: duration)
     }
 
     private func openDashboard(tab: DashboardTab) {
@@ -632,6 +746,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         appState.selectedTab = tab
+        settingsWindowController?.window?.orderOut(nil)
+        manualRecordWindowController?.window?.orderOut(nil)
         
         if dashboardWindowController == nil {
             dashboardWindowController = DashboardWindowController(appState: appState)
@@ -639,6 +755,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         dashboardWindowController?.showWindow(nil)
         dashboardWindowController?.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc func togglePureFocus() {
+        if deepFocusWindows.isEmpty {
+            enterDeepFocus()
+        } else {
+            closeDeepFocusWindows()
+        }
     }
 
     @objc private func enterDeepFocus() {
@@ -685,7 +809,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             afkReturnWindowController?.close()
         }
         
-        let window = NSWindow(
+        let window = KeyWindow(
             contentRect: NSRect(x: 0, y: 0, width: 720, height: 720),
             styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             backing: .buffered,
@@ -698,6 +822,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.isOpaque = false
         window.hasShadow = true
         window.level = .floating
+        window.isReleasedWhenClosed = false
+        window.tabbingMode = .disallowed
         window.setFrameAutosaveName("AFKReturnWindow")
         
         if window.setFrameUsingName("AFKReturnWindow") == false {
@@ -720,12 +846,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
         
-        window.contentView = NSHostingView(rootView: view)
+        window.contentViewController = NSHostingController(rootView: view)
         
         afkReturnWindowController = NSWindowController(window: window)
         afkReturnWindowController?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+        }
     }
     
     private func finalizeAFKReturn() {

@@ -28,6 +28,7 @@ enum PlanScope: String, CaseIterable, Identifiable {
 
 struct StatsView: View {
     @ObservedObject var appState: AppState
+    @State private var layoutWidth: CGFloat = 760
     @State private var period: StatsPeriod = .today
     @State private var customStart: Date = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
     @State private var customEnd: Date = Date()
@@ -81,7 +82,6 @@ struct StatsView: View {
     // Editing & Deletion
     @State private var editingSession: WorkSession? = nil
     @State private var sessionToDelete: WorkSession? = nil
-    @State private var showingAddActivity = false
 
     
     // Folding & Sorting
@@ -151,49 +151,71 @@ struct StatsView: View {
                         .padding(.vertical, 6)
                         .background(
                             ZStack {
-                                Color.purple.opacity(0.1)
+                                SeedoStyle.accent.opacity(0.1)
                                 RoundedRectangle(cornerRadius: 16)
-                                    .stroke(Color.purple.opacity(0.3), lineWidth: 1)
+                                    .stroke(SeedoStyle.accent.opacity(0.3), lineWidth: 1)
                             }
                         )
-                        .foregroundStyle(.purple)
+                        .foregroundStyle(SeedoStyle.accent)
                     }
                     .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 25)
             .padding(.vertical, 16)
-            .background(.ultraThinMaterial)
+            .background(SeedoStyle.surface)
             .zIndex(10)
             
             Divider()
             
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    // 2. Unified Plan Board (Goal Banner)
+                    SeedoPageHeading(title: "专注总览", subtitle: "看见时间，也看见进展。", symbol: "leaf")
+                    VStack(alignment: .leading, spacing: 18) {
+                        TimerSection(appState: appState)
+                        Divider()
+                        TodayTasksView(appState: appState)
+                        Divider()
+                        CoachTasksView(appState: appState)
+                    }
+                    .seedoCard()
+
                     unifiedPlanBoard
-                        .padding(.bottom, 5)
-                
-                // 3. Main Data Area: 2 Columns
-                HStack(alignment: .top, spacing: 20) {
-                    // Left Column: Top Apps
-                    topAppsSection
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    
-                    // Right Column: Charts Stack
-                    VStack(alignment: .trailing, spacing: 20) {
+
+                    if period == .custom { customRangePicker }
+                    if layoutWidth >= 900 {
+                        HStack(alignment: .top, spacing: 20) {
+                            topAppsSection.frame(maxWidth: .infinity)
+                            VStack(spacing: 20) {
+                                trendChartSection
+                                tagStatsSection
+                            }
+                            .frame(width: 380)
+                        }
+                    } else if layoutWidth >= 760 {
                         trendChartSection
+                        HStack(alignment: .top, spacing: 16) {
+                            topAppsSection.frame(maxWidth: .infinity)
+                            tagStatsSection.frame(maxWidth: .infinity)
+                        }
+                    } else {
+                        trendChartSection
+                        topAppsSection
                         tagStatsSection
                     }
-                    .frame(width: 380)
-                }
-                .fixedSize(horizontal: false, vertical: true)
-                
-                if period == .custom { customRangePicker }
-                
+
                 historySection
             }
             .padding(25)
+        }
+    }
+    .background(SeedoStyle.canvas)
+    .tint(SeedoStyle.accent)
+    .background {
+        GeometryReader { geometry in
+            Color.clear
+                .onAppear { layoutWidth = geometry.size.width }
+                .onChange(of: geometry.size.width) { _, width in layoutWidth = width }
         }
     }
     .sheet(isPresented: $isEditingPlans) {
@@ -225,15 +247,6 @@ struct StatsView: View {
                     editingSession = nil
                 },
                 onCancel: { editingSession = nil }
-            )
-        }
-        .sheet(isPresented: $showingAddActivity) {
-            AddActivitySheet(
-                onSave: { session in
-                    saveManualSession(session)
-                    showingAddActivity = false
-                },
-                onCancel: { showingAddActivity = false }
             )
         }
 
@@ -285,14 +298,8 @@ struct StatsView: View {
         .onChange(of: customStart) { _ in if period == .custom { loadPeriodData() } }
         .onChange(of: customEnd)   { _ in if period == .custom { loadPeriodData() } }
 
-        .onReceive(NotificationCenter.default.publisher(for: .shouldShowAddActivity)) { note in
-            if let durationSecs = note.object as? Double {
-                // Pre-fill duration if passed in notification (from Stop & Record)
-                // We'll pass this through a specialized state if needed, or just trigger the sheet
-                // For now, let's use a simpler approach: the sheet will check appState if prefilled
-                NotificationCenter.default.post(name: NSNotification.Name("PrefillAddActivity"), object: durationSecs)
-            }
-            showingAddActivity = true
+        .onReceive(NotificationCenter.default.publisher(for: .workSessionDidSave)) { _ in
+            loadData()
         }
         .onReceive(NotificationCenter.default.publisher(for: .shouldRunAISummary)) { _ in
             generateAISummary()
@@ -326,16 +333,13 @@ struct StatsView: View {
     
     private var unifiedPlanBoard: some View {
         HStack(spacing: 16) {
-            planItemCompact(title: "日度计划", content: dailyPlan, color: .blue)
+            planItemCompact(title: "日度计划", content: dailyPlan, color: SeedoStyle.accent)
             Divider().frame(height: 30).opacity(0.3)
-            planItemCompact(title: "月度计划", content: monthlyPlan, color: .purple)
+            planItemCompact(title: "月度计划", content: monthlyPlan, color: SeedoStyle.accent)
             Divider().frame(height: 30).opacity(0.3)
-            planItemCompact(title: "年度计划", content: yearlyPlan, color: .orange)
+            planItemCompact(title: "年度计划", content: yearlyPlan, color: SeedoStyle.accent)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(Color.primary.opacity(0.04))
-        .cornerRadius(12)
+        .seedoCard(padding: 18)
         .onTapGesture(count: 2) {
             isEditingPlans = true
         }
@@ -433,7 +437,7 @@ struct StatsView: View {
                         AxisValueLabel {
                             if let val = value.as(Double.self) {
                                 Text("\(Int(val)) min")
-                                    .font(.system(size: 8))
+                                    .font(.system(size: 10))
                             }
                         }
                     }
@@ -466,7 +470,7 @@ struct StatsView: View {
                                         Circle().fill(p.category.color).frame(width: 6, height: 6)
                                         Text(p.category.name).font(.system(size: 9))
                                         Spacer()
-                                        Text(formatDuration(p.durationSecs)).font(.system(size: 9, design: .monospaced))
+                                        Text(formatDuration(p.durationSecs)).font(.system(size: 11, design: .monospaced))
                                     }
                                 }
                             }
@@ -480,9 +484,7 @@ struct StatsView: View {
                 }
             }
         }
-        .padding(16)
-        .background(Color.secondary.opacity(0.04))
-        .cornerRadius(16)
+        .seedoCard()
     }
     
     // Removed TrendChartConfiguration helper
@@ -567,9 +569,7 @@ struct StatsView: View {
                 }
             }
         }
-        .padding(16)
-        .background(Color.secondary.opacity(0.04))
-        .cornerRadius(16)
+        .seedoCard()
     }
 
     private var tagStatsSection: some View {
@@ -629,9 +629,7 @@ struct StatsView: View {
                 }
             }
         }
-        .padding(16)
-        .background(Color.secondary.opacity(0.04))
-        .cornerRadius(16)
+        .seedoCard()
         .frame(maxWidth: .infinity, alignment: .top)
         .onHover { over in
             withAnimation(.spring()) {
@@ -738,7 +736,7 @@ struct StatsView: View {
                         HStack(spacing: 2) {
                             ForEach(0..<5) { idx in
                                 Image(systemName: "star.fill")
-                                    .font(.system(size: 8))
+                                    .font(.system(size: 10))
                                     .foregroundStyle(idx < s.score ? .orange : .secondary.opacity(0.3))
                             }
                         }
@@ -755,7 +753,7 @@ struct StatsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Text("包含自动统计、手动记录与计划达成校准。")
-                        .font(.system(size: 8))
+                        .font(.system(size: 10))
                         .foregroundStyle(.secondary.opacity(0.8))
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -808,7 +806,7 @@ struct StatsView: View {
                     HStack(spacing: 4) {
                         Text(historySortOrder.rawValue)
                         Image(systemName: historySortOrder == .newestFirst ? "arrow.down" : "arrow.up")
-                            .font(.system(size: 8))
+                            .font(.system(size: 10))
                     }
                     .font(.system(size: 10, weight: .bold))
                     .padding(.horizontal, 8)
@@ -819,7 +817,9 @@ struct StatsView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
                 
-                Button(action: { showingAddActivity = true }) {
+                Button(action: {
+                    NotificationCenter.default.post(name: .shouldShowAddActivity, object: nil)
+                }) {
                     Image(systemName: "plus.circle.fill")
                         .font(.title2)
                 }
@@ -891,7 +891,7 @@ struct StatsView: View {
                                 
                                 if !isExpanded {
                                     Text("\(dayItems.count) 项")
-                                        .font(.system(size: 8))
+                                        .font(.system(size: 10))
                                         .foregroundStyle(.tertiary)
                                 }
                             }
@@ -1185,10 +1185,10 @@ struct StatsView: View {
         var body: some View {
             HStack(spacing: 12) {
                 Image(systemName: "sparkles")
-                    .foregroundStyle(.purple)
+                    .foregroundStyle(SeedoStyle.accent)
                     .font(.system(size: 14))
                     .frame(width: 32, height: 32)
-                    .background(Color.purple.opacity(0.1))
+                    .background(SeedoStyle.accent.opacity(0.1))
                     .clipShape(Circle())
                 
                 VStack(alignment: .leading, spacing: 2) {
@@ -1210,7 +1210,7 @@ struct StatsView: View {
                 .font(.system(size: 10, weight: .bold))
             }
             .padding(12)
-            .background(Color.purple.opacity(0.04))
+            .background(SeedoStyle.accent.opacity(0.04))
             .cornerRadius(10)
             .onTapGesture {
                 if let appDelegate = NSApp.delegate as? AppDelegate {
@@ -1325,7 +1325,7 @@ struct StatsView: View {
                 
                 if !merged.intervals.isEmpty {
                     Text(merged.intervals.joined(separator: " · "))
-                        .font(.system(size: 8))
+                        .font(.system(size: 10))
                         .foregroundStyle(.secondary.opacity(0.8))
                 }
 
@@ -1356,7 +1356,7 @@ struct StatsView: View {
                 }
                 
                 Text(formatTimestamp(session.startTs))
-                    .font(.system(size: 8))
+                    .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
             .padding(12)
@@ -1398,21 +1398,6 @@ struct StatsView: View {
 
     // MARK: - Data Loading
     
-    private func saveManualSession(_ session: WorkSession) {
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                var s = session
-                try WorkSessionStore().insert(&s)
-                
-                DispatchQueue.main.async {
-                    loadData()
-                }
-            } catch {
-                print("[StatsView] Save manual failed: \(error)")
-            }
-        }
-    }
-
     private func deleteSession(_ session: WorkSession) {
         guard let id = session.id else { return }
         DispatchQueue.global(qos: .userInitiated).async {

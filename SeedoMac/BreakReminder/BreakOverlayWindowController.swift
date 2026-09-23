@@ -16,6 +16,7 @@ final class BreakOverlayWindowController: NSWindowController {
     private let durationMins: Int
     private let sessionIndex: Int
     private let totalSessions: Int
+    private let sessionAlreadyRecorded: Bool
     
     private let initialSummary: String
     private let initialNotes: String
@@ -25,6 +26,7 @@ final class BreakOverlayWindowController: NSWindowController {
     
     init(startTs: Int64, endTs: Int64, durationSecs: Double, canPostpone: Bool,
          isLongBreak: Bool, durationMins: Int, sessionIndex: Int, totalSessions: Int,
+         sessionAlreadyRecorded: Bool = false,
          initialSummary: String = "", initialNotes: String = "", initialCategoryId: String? = nil) {
         self.startTs = startTs
         self.endTs = endTs
@@ -34,6 +36,7 @@ final class BreakOverlayWindowController: NSWindowController {
         self.durationMins = durationMins
         self.sessionIndex = sessionIndex
         self.totalSessions = totalSessions
+        self.sessionAlreadyRecorded = sessionAlreadyRecorded
         self.initialSummary = initialSummary
         self.initialNotes = initialNotes
         self.initialCategoryId = initialCategoryId
@@ -57,6 +60,7 @@ final class BreakOverlayWindowController: NSWindowController {
             )
             
             window.level = .screenSaver
+            window.isReleasedWhenClosed = false
             window.backgroundColor = .clear
             window.isOpaque = false
             window.hasShadow = false
@@ -72,6 +76,7 @@ final class BreakOverlayWindowController: NSWindowController {
                 durationMins: durationMins,
                 sessionIndex: sessionIndex,
                 totalSessions: totalSessions,
+                sessionAlreadyRecorded: sessionAlreadyRecorded,
                 initialSummary: initialSummary,
                 initialNotes: initialNotes,
                 initialCategoryId: initialCategoryId,
@@ -87,7 +92,11 @@ final class BreakOverlayWindowController: NSWindowController {
                     self?.close()
                 },
                 onFinishBreak: { [weak self] summary, notes, catId in
-                    BreakScheduler.shared.endBreak(summary: summary, title: notes, categoryId: catId, outcome: "completed", startTs: self?.startTs ?? 0, endTs: self?.endTs ?? 0)
+                    if self?.sessionAlreadyRecorded == true {
+                        BreakScheduler.shared.finishAlreadyRecordedBreak()
+                    } else {
+                        BreakScheduler.shared.endBreak(summary: summary, title: notes, categoryId: catId, outcome: "completed", startTs: self?.startTs ?? 0, endTs: self?.endTs ?? 0)
+                    }
                     self?.close()
                 },
                 onPauseTracking: { [weak self] in
@@ -108,7 +117,6 @@ final class BreakOverlayWindowController: NSWindowController {
     
     override func showWindow(_ sender: Any?) {
         for window in overlayWindows {
-            window.center()
             window.makeKeyAndOrderFront(nil)
         }
         NSApp.activate(ignoringOtherApps: true)
@@ -122,11 +130,4 @@ final class BreakOverlayWindowController: NSWindowController {
         super.close()
     }
     
-    // Support ESC to postpone
-    override func cancelOperation(_ sender: Any?) {
-        if canPostpone {
-            BreakScheduler.shared.postponeBreak()
-            self.close()
-        }
-    }
 }

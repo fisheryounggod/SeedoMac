@@ -37,6 +37,7 @@ struct SettingsView: View {
     @State private var autoExportEnabled: Bool = false
     @State private var autoExportInterval: Int = 24
     @State private var autoExportPath: String = ""
+    @State private var globalShortcutsEnabled: Bool = true
     @State private var saveStatus: String? = nil
 
     private let providers: [(String, String, String)] = [
@@ -48,6 +49,7 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            SeedoPageHeading(title: "偏好设置", subtitle: "找到适合自己的专注节奏。", symbol: "slider.horizontal.3")
             // 1. Core Focus Settings
             Section("通用设置") {
                 Toggle("开机自启", isOn: $autostartEnabled)
@@ -122,7 +124,7 @@ struct SettingsView: View {
             }
 
             // 2. AI & Sync Integrations
-            Section("AI 与 外部同步") {
+            Section("AI 与外部同步") {
                 DisclosureGroup("AI 模型配置") {
                     VStack(alignment: .leading, spacing: 12) {
                         Picker("供应商", selection: $provider) {
@@ -290,13 +292,15 @@ struct SettingsView: View {
                 
                 DisclosureGroup("全局快捷键") {
                     VStack(spacing: 10) {
+                        Toggle("启用全局快捷键", isOn: $globalShortcutsEnabled)
+                            .help("关闭后，快捷键只在 Seedo 的窗口和菜单中生效")
                         HStack {
                             Text("开始/暂停专注")
                             Spacer()
                             KeyboardShortcuts.Recorder(for: .startPauseFocus)
                         }
                         HStack {
-                            Text("开启专注悬浮窗")
+                            Text("切换专注悬浮窗")
                             Spacer()
                             KeyboardShortcuts.Recorder(for: .togglePureFocus)
                         }
@@ -305,6 +309,24 @@ struct SettingsView: View {
                             Spacer()
                             KeyboardShortcuts.Recorder(for: .openSettings)
                         }
+                        HStack {
+                            Text("手动添加记录")
+                            Spacer()
+                            KeyboardShortcuts.Recorder(for: .addManualRecord)
+                        }
+                        HStack {
+                            Text("详细统计")
+                            Spacer()
+                            KeyboardShortcuts.Recorder(for: .openStats)
+                        }
+                        HStack {
+                            Text("结束并记录")
+                            Spacer()
+                            KeyboardShortcuts.Recorder(for: .stopAndRecord)
+                        }
+                        Text("右键菜单与全局快捷键共用以上配置；关闭全局快捷键后，右键菜单中的按键仍可用。手动记录窗口：⌘Return 保存，Esc 取消。退出保持菜单专用。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 8)
                 }
@@ -428,10 +450,15 @@ struct SettingsView: View {
             HStack {
                 Spacer()
                 if let status = saveStatus { Text(status).foregroundStyle(.secondary).font(.caption) }
-                Button("保存设置") { saveSettings() }.buttonStyle(.borderedProminent)
+                Button("保存设置") { saveSettings() }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut("s", modifiers: .command)
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(SeedoStyle.canvas)
+        .tint(SeedoStyle.accent)
         .onAppear {
             loadSettings()
             refreshCategories()
@@ -477,6 +504,7 @@ struct SettingsView: View {
         autoExportEnabled = AppDatabase.shared.setting(for: "auto_export_enabled") == "true"
         autoExportInterval = Int(AppDatabase.shared.setting(for: "auto_export_interval_hours") ?? "24") ?? 24
         autoExportPath = AppDatabase.shared.setting(for: "auto_export_path") ?? ""
+        globalShortcutsEnabled = AppDatabase.shared.setting(for: "global_shortcuts_enabled") != "false"
         
         appState.isUsageReminderEnabled = AppDatabase.shared.setting(for: "usage_reminder_enabled") == "true"
         appState.usageReminderThresholdMins = Int(AppDatabase.shared.setting(for: "usage_reminder_threshold_mins") ?? "60") ?? 60
@@ -536,6 +564,7 @@ struct SettingsView: View {
         AppDatabase.shared.saveSetting(key: "auto_export_enabled", value: autoExportEnabled ? "true" : "false")
         AppDatabase.shared.saveSetting(key: "auto_export_interval_hours", value: String(autoExportInterval))
         AppDatabase.shared.saveSetting(key: "auto_export_path", value: autoExportPath)
+        AppDatabase.shared.saveSetting(key: "global_shortcuts_enabled", value: globalShortcutsEnabled ? "true" : "false")
         
         appState.isMacFocusModeEnabled = enableMacFocusMode
         appState.isAutoExportEnabled = autoExportEnabled

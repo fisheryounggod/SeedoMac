@@ -4,10 +4,18 @@ import AppKit
 
 class NotificationService: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationService()
+    private var dayObserver: NSObjectProtocol?
     
     override init() {
         super.init()
         UNUserNotificationCenter.current().delegate = self
+        dayObserver = NotificationCenter.default.addObserver(forName: .NSCalendarDayChanged, object: nil, queue: .main) { [weak self] _ in
+            let state = AppState.shared
+            state.refreshTodayGoal()
+            if state.isDailyRemindersEnabled {
+                self?.scheduleDailyReminders(times: state.dailyReminderTimes)
+            }
+        }
     }
     
     func requestAuthorization(completion: ((Bool) -> Void)? = nil) {
@@ -20,20 +28,30 @@ class NotificationService: NSObject, UNUserNotificationCenterDelegate {
     }
     
     func scheduleDailyReminders(times: [Date]) {
-        cancelAllDailyReminders()
-        
-        let content = UNMutableNotificationContent()
-        content.title = "该开启专注了"
-        content.body = "设定一个小目标，开始今天的深度工作吧！"
-        content.sound = .default
-        
+        // Date-specific requests prevent today's task from repeating tomorrow.
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers:
+            (0..<64).map { "daily_focus_reminder_\($0)" })
         let calendar = Calendar.current
-        for (index, time) in times.enumerated() {
-            let components = calendar.dateComponents([.hour, .minute], from: time)
-            let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
-            let request = UNNotificationRequest(identifier: "daily_focus_reminder_\(index)", content: content, trigger: trigger)
-            
-            UNUserNotificationCenter.current().add(request)
+        let now = Date()
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        var index = 0
+        for offset in 0..<7 {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: now) else { continue }
+            for time in times.sorted() {
+                let clock = calendar.dateComponents([.hour, .minute], from: time)
+                guard let date = calendar.date(bySettingHour: clock.hour ?? 0, minute: clock.minute ?? 0, second: 0, of: day), date > now, index < 63 else { continue }
+                let content = UNMutableNotificationContent()
+                content.title = "该开启专注了"
+                content.body = goalReminder(for: formatter.string(from: date))
+                content.sound = .default
+                let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+                let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+                center.add(UNNotificationRequest(identifier: "daily_focus_reminder_\(index)", content: content, trigger: trigger))
+                index += 1
+            }
         }
         print("[NotificationService] Scheduled \(times.count) daily reminders")
     }
@@ -41,11 +59,16 @@ class NotificationService: NSObject, UNUserNotificationCenterDelegate {
     func showUsageReminder() {
         let content = UNMutableNotificationContent()
         content.title = "使用电脑太久啦"
-        content.body = "您已经连续使用电脑一段时间了，不如开启一轮专注来记录一下？"
+        content.body = goalReminder(for: AppState.todayKey())
         content.sound = .default
         
         let request = UNNotificationRequest(identifier: "usage_reminder_\(Date().timeIntervalSince1970)", content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+    }
+
+    private func goalReminder(for date: String) -> String {
+        let goal = AppDatabase.shared.exactDailyPlan(for: date).trimmingCharacters(in: .whitespacesAndNewlines)
+        return goal.isEmpty ? "今天还没有设定目标，点击添加今天要完成的任务。" : "今日任务：\(goal)"
     }
     
     func cancelAllDailyReminders() {

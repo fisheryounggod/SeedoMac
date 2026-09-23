@@ -20,8 +20,8 @@ struct AIReviewView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Label(isEditing ? "编辑复盘报告: \(label)" : "AI 深度复盘: \(label)", systemImage: "sparkles")
-                    .font(.headline)
-                    .foregroundStyle(.purple)
+                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+                    .foregroundStyle(SeedoStyle.accent)
                 Spacer()
                 
                 if onSave != nil {
@@ -82,8 +82,9 @@ struct AIReviewView: View {
             .padding(.top, 8)
         }
         .padding(24)
-        .frame(minWidth: 550, minHeight: 650)
-        .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
+        .frame(minWidth: 550, minHeight: 480)
+        .background(SeedoStyle.canvas)
+        .tint(SeedoStyle.accent)
     }
 }
 

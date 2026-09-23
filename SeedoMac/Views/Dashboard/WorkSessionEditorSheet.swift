@@ -24,8 +24,8 @@ struct WorkSessionEditorSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(session.isManual ? "编辑手动活动" : "编辑专注段")
-                .font(.headline)
+            SeedoPageHeading(title: session.isManual ? "编辑手动活动" : "编辑专注段",
+                             subtitle: "补充细节，留住这段进展。", symbol: "square.and.pencil")
             
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -37,7 +37,7 @@ struct WorkSessionEditorSheet: View {
                                 .font(.caption)
                         }
                         .buttonStyle(.plain)
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(SeedoStyle.accent)
                         .disabled(isGenerating)
                     }
                     TextField("这次活动的主要总结...", text: $session.summary)
@@ -92,16 +92,18 @@ struct WorkSessionEditorSheet: View {
 
             HStack {
                 Spacer()
-                Button("取消") { onCancel() }
+                Button("取消") { onCancel() }.buttonStyle(SeedoButtonStyle())
                 Button("保存") {
                     onSave(session)
                 }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(SeedoButtonStyle(prominent: true))
                     .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(20)
-        .frame(width: 440)
+        .padding(28)
+        .frame(width: 480)
+        .background(SeedoStyle.canvas)
+        .tint(SeedoStyle.accent)
     }
 
     private func generateAISummary() {
